@@ -1,6 +1,13 @@
 name: TikTok order automation
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/tiktok-order-automation.yml"
+      - "requirements.txt"
+      - "scripts/**"
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
