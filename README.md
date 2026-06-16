@@ -116,6 +116,28 @@ Optional kann ein Windows-Task angelegt werden:
 .\scripts\install_order_automation_task.ps1
 ```
 
+Dauerlauf fuer neue Bestellungen: prueft regelmaessig TikTok und bereitet nur neue, noch nicht verarbeitete Orders vor. Wenn nichts Neues da ist, wird kein leerer Output-Ordner erzeugt.
+
+```powershell
+.\scripts\watch_order_automation_new_orders.ps1 -PollMinutes 5
+```
+
+Optional als Windows-Task beim Login starten:
+
+```powershell
+.\scripts\install_order_automation_new_orders_task.ps1 -PollMinutes 5
+```
+
+Laptop-unabhaengiger Lauf ueber GitHub Actions: `.github/workflows/tiktok-order-automation.yml` prueft alle 15 Minuten und kann auch manuell ueber den Actions-Tab gestartet werden. Dafuer muessen in GitHub unter `Settings > Secrets and variables > Actions` diese Repository-Secrets gesetzt sein:
+
+- `LIBRI_CUSTOMER_NUMBER`
+- `TIKTOK_APP_KEY`
+- `TIKTOK_APP_SECRET`
+- `TIKTOK_ACCESS_TOKEN`
+- `TIKTOK_SHOP_CIPHER` falls TikTok mehrere Shops fuer den Token zurueckgibt
+
+Wenn neue Bestellungen vorbereitet werden, liegen die Dateien als Actions-Artifact `libri-order-packages-<run-id>` im jeweiligen Workflow-Lauf. Der Workflow commitet nur `.automation/order_state.json`, damit dieselbe Bestellung nicht bei jedem Poll erneut vorbereitet wird.
+
 Die Ergebnisse liegen in `outputs/order_automation/<timestamp>/<order-id>/`:
 
 - `libri_kundenbestellung_import.xlsx`: Libri-Import fuer die Artikel dieser einen TikTok-Bestellung.

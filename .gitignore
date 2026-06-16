@@ -1,4 +1,5 @@
 .env
+.env.bak
 outputs/
 __pycache__/
 *.pyc

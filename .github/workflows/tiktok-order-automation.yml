@@ -1,0 +1,103 @@
+name: TikTok order automation
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: tiktok-order-automation
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-orders:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Create local env file
+        env:
+          LIBRI_CUSTOMER_NUMBER: ${{ secrets.LIBRI_CUSTOMER_NUMBER }}
+          TIKTOK_APP_KEY: ${{ secrets.TIKTOK_APP_KEY }}
+          TIKTOK_APP_SECRET: ${{ secrets.TIKTOK_APP_SECRET }}
+          TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
+          TIKTOK_SHOP_CIPHER: ${{ secrets.TIKTOK_SHOP_CIPHER }}
+        run: |
+          python - <<'PY'
+          import os
+
+          defaults = {
+              "TIKTOK_BASE_URL": "https://open-api.tiktokglobalshop.com",
+              "TIKTOK_API_VERSION": "202309",
+              "TIKTOK_ORDER_STATUS": "AWAITING_SHIPMENT",
+              "TIKTOK_INCLUDE_VERSION": "true",
+              "TIKTOK_ACCESS_TOKEN_IN_QUERY": "false",
+              "TIKTOK_SIGN_INCLUDE_BODY": "true",
+          }
+          secret_keys = [
+              "LIBRI_CUSTOMER_NUMBER",
+              "TIKTOK_APP_KEY",
+              "TIKTOK_APP_SECRET",
+              "TIKTOK_ACCESS_TOKEN",
+              "TIKTOK_SHOP_CIPHER",
+          ]
+
+          with open(".env", "w", encoding="utf-8") as env_file:
+              for key in secret_keys:
+                  env_file.write(f"{key}={os.environ.get(key, '')}\n")
+              for key, value in defaults.items():
+                  env_file.write(f"{key}={value}\n")
+          PY
+
+      - name: Prepare new orders
+        run: |
+          python scripts/tiktok_order_automation.py \
+            --env .env \
+            --output-root outputs/order_automation \
+            --state .automation/order_state.json \
+            --skip-empty-runs
+
+      - name: Check for prepared files
+        id: prepared-files
+        run: |
+          if [ -d outputs/order_automation ] && find outputs/order_automation -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload prepared Libri files
+        if: steps.prepared-files.outputs.created == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: libri-order-packages-${{ github.run_id }}
+          path: outputs/order_automation/
+          retention-days: 14
+
+      - name: Save processed-order state
+        if: success()
+        run: |
+          if git diff --quiet -- .automation/order_state.json; then
+            echo "No order-state changes."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .automation/order_state.json
+          git commit -m "Update TikTok order automation state"
+          git pull --rebase
+          git push

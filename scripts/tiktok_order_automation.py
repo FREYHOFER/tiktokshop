@@ -24,6 +24,7 @@ import re
 import sys
 import time
 import urllib.error
+import subprocess
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass, field
@@ -656,13 +657,12 @@ def prepare_orders(
     customer_number: str,
     rebuild: bool,
     ignore_state: bool,
-) -> tuple[Path, dict[str, str]]:
-    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = output_root / stamp
-    run_dir.mkdir(parents=True, exist_ok=True)
+    skip_empty_runs: bool,
+) -> tuple[Path | None, dict[str, str]]:
     state = load_state(state_path)
     prepared = state.setdefault("prepared_orders", {})
     statuses: dict[str, str] = {}
+    orders_to_write: list[tuple[AutomationOrder, list[OrderLine]]] = []
 
     for order in orders:
         order_key = order.order_id
@@ -679,7 +679,17 @@ def prepare_orders(
             statuses[order_key] = "prepared_with_warnings"
         else:
             statuses[order_key] = "prepared"
+        orders_to_write.append((order, valid_lines))
 
+    if skip_empty_runs and not orders_to_write:
+        return None, statuses
+
+    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = output_root / stamp
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    for order, valid_lines in orders_to_write:
+        order_key = order.order_id
         order_dir = run_dir / safe_filename(order_key)
         order_dir.mkdir(parents=True, exist_ok=True)
         order_for_file = AutomationOrder(**{**asdict(order), "address": order.address, "lines": valid_lines})
@@ -715,7 +725,7 @@ def fetch_from_api(args: argparse.Namespace, env: dict[str, str], env_path: Path
     return [normalize_api_order(order, "tiktok_api_search_only") for order in search_orders]
 
 
-def run_once(args: argparse.Namespace) -> tuple[Path, dict[str, str], int]:
+def run_once(args: argparse.Namespace) -> tuple[Path | None, dict[str, str], int]:
     env_path = Path(args.env)
     env = load_env_file(env_path)
     customer_number = env_value(env, "LIBRI_CUSTOMER_NUMBER")
@@ -730,8 +740,48 @@ def run_once(args: argparse.Namespace) -> tuple[Path, dict[str, str], int]:
         customer_number=customer_number,
         rebuild=args.rebuild,
         ignore_state=args.ignore_state,
+        skip_empty_runs=args.skip_empty_runs,
     )
+
+    # Auto-submit orders to Libri if requested
+    if args.auto_submit_libri and run_dir is not None:
+        auto_submit_prepared_orders(run_dir, statuses, env_path)
+
     return run_dir, statuses, len(orders)
+
+
+def auto_submit_prepared_orders(run_dir: Path, statuses: dict[str, str], env_path: Path) -> None:
+    """Automatically submit prepared orders to Libri."""
+    submitted = 0
+    failed = 0
+    for order_id, status in statuses.items():
+        if status.startswith("prepared"):
+            order_dir = run_dir / safe_filename(order_id)
+            if not order_dir.exists():
+                print(f"⚠ Order directory not found: {order_dir}")
+                failed += 1
+                continue
+
+            print(f"Auto-submitting order {order_id} to Libri...")
+            script_path = Path(__file__).resolve().parent / "libri_customer_submit.py"
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(script_path), "--order-dir", str(order_dir), "--env", str(env_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if result.returncode == 0:
+                    print(f"✓ Order {order_id} submitted successfully")
+                    submitted += 1
+                else:
+                    print(f"✗ Order {order_id} submission failed: {result.stderr}")
+                    failed += 1
+            except Exception as e:
+                print(f"✗ Error submitting order {order_id}: {e}")
+                failed += 1
+
+    print(f"Libri submissions: {submitted} success, {failed} failed")
 
 
 def seconds_until_run_at(run_at: str, timezone_name: str) -> float:
@@ -752,7 +802,8 @@ def watch(args: argparse.Namespace) -> int:
             time.sleep(wait_seconds)
         run_dir, statuses, order_count = run_once(args)
         prepared_count = sum(1 for status in statuses.values() if status.startswith("prepared"))
-        print(f"{dt.datetime.now().isoformat(timespec='seconds')} - found {order_count}, prepared {prepared_count}: {run_dir.resolve()}", flush=True)
+        output_text = str(run_dir.resolve()) if run_dir else "no new output"
+        print(f"{dt.datetime.now().isoformat(timespec='seconds')} - found {order_count}, prepared {prepared_count}: {output_text}", flush=True)
         if not args.run_at:
             time.sleep(max(args.poll_minutes, 1) * 60)
 
@@ -776,6 +827,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-at", default="", help="Daily run time like 17:00. Only used with --watch.")
     parser.add_argument("--timezone", default=DEFAULT_TIMEZONE)
     parser.add_argument("--poll-minutes", type=int, default=15)
+    parser.add_argument("--skip-empty-runs", action="store_true", help="Do not create an output folder when there are no new orders.")
+    parser.add_argument(
+        "--auto-submit-libri",
+        action="store_true",
+        help="Submit prepared orders to Libri after file generation. This places real Libri orders.",
+    )
     return parser
 
 
@@ -791,7 +848,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Prepared: {prepared_count}")
     print(f"Needs review/warnings: {review_count}")
     print(f"Skipped: {skipped_count}")
-    print(f"Output: {run_dir.resolve()}")
+    if run_dir:
+        print(f"Output: {run_dir.resolve()}")
+    else:
+        print("Output: none (no new orders)")
     return 0
 
 
