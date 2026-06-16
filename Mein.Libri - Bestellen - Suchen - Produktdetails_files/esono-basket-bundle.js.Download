@@ -1,0 +1,45 @@
+(function ($) {
+
+    "use strict";
+
+    // TODO this is all very specific and will break silently with the next (design) update
+    $('#basket .check-all').on('click', function(event) {
+        var newlyChecked = $(this).find('input[type="checkbox"]').prop('checked');
+
+        if (newlyChecked) {
+            var uncheckedBoxes = $('.list-block').find('tbody .column-order .replaced-checkbox:not(.checked)');
+            uncheckedBoxes.click();
+        } else {
+            var checkedBoxes = $('.list-block').find('tbody .column-order .replaced-checkbox.checked');
+            checkedBoxes.click();
+        }
+    });
+
+    // Do an update correctly on ENTER in input in basket/confirm view (not the next delete button)
+    $('#checkoutForm input[type="text"]').keydown(function(e) {
+        if (e.which == 13) {
+            e.preventDefault();
+
+            var form = $(this).closest('form');
+
+            if (form.length) {
+                // Set marker to allow prohibit normal form submit (ie execute order)
+
+                $('<input />').attr('type', 'hidden')
+                    .attr('name', 'onlyUpdate')
+                    .attr('value', '1')
+                    .appendTo(form);
+
+                form.submit();
+            }
+        }
+    });
+
+    $('#basket .orderReference').focusout(function(e) {
+        var token = $("[name='cmsauthenticitytoken']").attr("value");
+        var itemid = e.currentTarget.dataset.itemid;
+        var orderReference = $(e.currentTarget).val();
+        $.post(e.currentTarget.baseURI, {'module_fnc[primary]': 'updateOrderReference', 'cmsauthenticitytoken': token, 'itemId': itemid, 'orderReference': orderReference});
+    });
+
+})(jQuery, window);

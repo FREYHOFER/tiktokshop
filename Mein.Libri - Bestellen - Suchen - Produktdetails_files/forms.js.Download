@@ -1,0 +1,14 @@
+(function ( $) {
+
+    "use strict";
+
+    jcf.replaceAll();
+
+
+    $('form input[type="text"] + .cmsmessage.messageerror').each(function() {
+        var input = $(this).prev();
+
+        input.addClass('withError');
+    });
+
+})( jQuery, window );

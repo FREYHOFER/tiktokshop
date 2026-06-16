@@ -1,0 +1,21 @@
+;(function ( $, window) {
+
+    "use strict";
+
+    $(document).ready(function () {
+        var isMobile = function() {
+            var isMobile = false;
+            var size = window.getComputedStyle(document.body,':before').getPropertyValue('content');
+            size = size.trim();
+            size = size.replace(/"/gm,''); //firefox
+            if (size == 'mobile' || size == "'mobile'") {
+                isMobile = true;
+            }
+
+            return isMobile;
+        };
+
+        window.isMobile = isMobile;
+    });
+
+})( jQuery, window );

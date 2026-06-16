@@ -1,0 +1,118 @@
+(function ($) {
+
+    "use strict";
+
+    $('#extended-search-button').on('click', function(event) {
+        $('.extended-search').toggleClass('visible');
+        $('.extended-search').find('input').first().select();
+
+        event.preventDefault();
+        event.stopPropagation();
+    });
+
+    function processProposals(response, popupId, page) {
+        try {
+            var result = response;
+
+            var popup = $('#' + popupId);
+            var popupNoContent = popup.find('.triggered-list-no-content');
+
+            if (0 == result.data.length) {
+                popupNoContent.show();
+            } else {
+                popupNoContent.hide();
+                var elements = $('<div></div>');
+                for (var i = 0; i < result.data.length; i++) {
+                    var element = $("<div>", {"class": "entry", "data-is-entry": "true", "data-content": result.data[i].name});
+                    element.text(result.data[i].name);
+                    if (result.data[i].description !== "") {
+                        element.text(result.data[i].name + " (" + result.data[i].description + ")");
+                    }
+                    element.appendTo(elements);
+                }
+            }
+
+            var popupPager = popup.find('.triggered-list-pager');
+            var pageInt = parseInt(page);
+            popupPager.find('[data-paging-direction="previous"]').attr('data-page', pageInt - 1);
+            popupPager.find('[data-paging-direction="previous"]').attr('data-from', result.from);
+            popupPager.find('[data-paging-direction="next"]').attr('data-page', pageInt + 1);
+            popupPager.find('[data-paging-direction="next"]').attr('data-from', result.from);
+
+            var popupContent = popup.find('.triggered-list-content');
+            popupContent.html(elements);
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    $('.triggered-list').on('click', function() {
+        var self = $(this);
+        var popup = self.find('.triggered-content');
+        var currentContent = $('#' + self.data('content-id')).val();
+        var popupId = popup.attr('id');
+
+        var callback = function (response) {
+            processProposals(response, popupId, 1);
+        };
+
+        var secTokName = self.data('security-name');
+        var secTok = self.data('security-token');
+
+        var callVariables = {
+            'module_fnc[primary]': 'ExecuteAjaxCall',
+            '_fnc': self.data('proposals-method'),
+            'namePrefix': currentContent,
+            'page': 1
+        };
+        callVariables[secTokName] = secTok;
+
+        $.get(
+            '?',
+            callVariables,
+            callback
+        );
+    });
+
+    $('.triggered-content').on('click', function(event) {
+        event.stopPropagation();
+
+        var contentId = $(this).parent().data('content-id');
+        var inputField = $('#' + contentId);
+
+        if ($(event.target).data('is-entry')) {
+            var selectedEntryText = $(event.target).data('content');
+            inputField.val(selectedEntryText);
+            inputField.focus();
+        } else if ($(event.target).data('paging-direction') == 'previous' || $(event.target).data('paging-direction') == 'next') {
+            var currentContent = inputField.val();
+            var proposalsMethod = $(this).parent().data('proposals-method');
+            var page = $(event.target).attr('data-page');
+            var from = $(event.target).attr('data-from');
+            var popupId = $(this).attr('id');
+
+            var callback = function(response) {
+                processProposals(response, popupId, page);
+            };
+
+            var secTokName = $(this).parent().data('security-name');
+            var secTok = $(this).parent().data('security-token');
+
+            var callVariables = {
+                'module_fnc[primary]': 'ExecuteAjaxCall',
+                '_fnc': proposalsMethod,
+                'namePrefix': currentContent,
+                'page': page,
+                'from': from
+            };
+            callVariables[secTokName] = secTok;
+
+            $.get(
+                '?',
+                callVariables,
+                callback
+            );
+        }
+    });
+
+})(jQuery, window);

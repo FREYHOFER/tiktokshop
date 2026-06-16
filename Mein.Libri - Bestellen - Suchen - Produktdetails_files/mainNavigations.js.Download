@@ -1,0 +1,35 @@
+;(function ($, window, document, undefined) {
+
+    "use strict";
+    $(document).ready(function () {
+
+        if (window.isMobile()) {
+            $('.burger-trigger').on('click', function () {
+                $('body').toggleClass('navigation-triggered');
+                //append logout button to menu if not there yet
+                if ($('#logout-button-main-navi').length === 0) {
+                    $('#slot-mainNavigation .snippetMainNavigation > ul').append('<li id="logout-button-main-navi">' + $('#slot-loginTeaser a')[0].outerHTML + '</li>');
+                }
+            });
+        }
+
+        $('html.touch .navigation-touch-fix li.has-children > a, html.touch .navigation-touch-fix li.has-children > span').on('click', function (e) {
+            var self = $(this);
+            var parentLi = self.parent();
+            parentLi.parents('ul').find('.active').removeClass('active');
+            parentLi.addClass('active');
+            e.preventDefault();
+            self.one('click', function (event) {
+                //open link if sub-menu is still open
+                if (parentLi.hasClass('active')) {
+                    var href = self.attr('href');
+                    if (href) {
+                        window.location.href = self.attr('href');
+                    }
+                }
+                event.preventDefault();
+            });
+        });
+    });
+
+})(jQuery, window, document);

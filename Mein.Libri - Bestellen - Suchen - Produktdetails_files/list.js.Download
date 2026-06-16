@@ -1,0 +1,26 @@
+(function ($) {
+
+    "use strict";
+
+    $('form.page-size select').on('change', function (event) {
+        $(this).parents('form').submit();
+    });
+
+    $('.enable-datepicker').each(function (index, item) {
+        $('input', $(item)).datepicker(
+            {
+                onClose: function(dateText) {
+                    $(this).focus();
+                }
+            },
+            $.datepicker.regional["de"]
+        );
+
+        $('<span class="icon"><span class="i i-kalender"></span></span>').appendTo($(item)).on('click', function (event) {
+            $('input', $(this).parent()).trigger('focus');
+        });
+    });
+
+    $('.enable-popover').popover();
+
+})(jQuery, window);

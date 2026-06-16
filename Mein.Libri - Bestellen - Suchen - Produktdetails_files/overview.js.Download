@@ -1,0 +1,35 @@
+;(function ( $, window, document, undefined ) {
+
+    "use strict";
+
+    $('.filter-block').each(function() {
+        $('#filter-date_start, #filter-date_end').on('change', function() {
+            if ($('#filter-date_start').val() && $('#filter-date_end').val()) {
+                $('#filter-date_interval').val('');
+
+                jcf.refreshAll();
+            }
+        });
+
+        $('#filter-date_interval').on('change', function() {
+            if ($('#filter-date_interval').val()) {
+                $('#filter-date_start, #filter-date_end').val('');
+            }
+        });
+    });
+
+    $('.radio-container').each(function() {
+        var container = $(this);
+        var button = $(this).find('input[type="radio"]');
+
+        if (button.prop("checked")) {
+            container.addClass("checked");
+        }
+
+        button.on('click', function() {
+            $('.radio-container').removeClass("checked");
+            container.addClass("checked");
+        });
+    });
+
+})( jQuery, window, document );

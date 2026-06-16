@@ -1,0 +1,8 @@
+$(function () {
+    $.fn.popover.Constructor.DEFAULTS.whiteList.table = [];
+    $.fn.popover.Constructor.DEFAULTS.whiteList.tbody = [];
+    $.fn.popover.Constructor.DEFAULTS.whiteList.tr = [];
+    $.fn.popover.Constructor.DEFAULTS.whiteList.td = [];
+
+    $('[data-toggle="popover"]').popover();
+});

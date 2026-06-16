@@ -1,0 +1,197 @@
+(function ($) {
+
+    "use strict";
+
+    function triggersReplacedCheckbox(e) {
+        return ' ' == e.key && $(e.target).is('div') && $(e.target).hasClass('replaced-checkbox');
+    }
+
+    function triggersMoveGroup(e) {
+        if ('ArrowDown' == e.key || 'ArrowUp' == e.key || 'Down' == e.key || 'Up' == e.key) {
+            var moveGroup = $(e.target).attr('data-keyMoveGroup');
+            return undefined != moveGroup;
+        }
+        return false;
+    }
+
+
+    // Generally avoid all propagation of key events that trigger something (here).
+    //  This especially prohibits browser keyboard shortcuts and other extensions with registered shortcuts.
+    //
+
+    document.addEventListener("keydown", function(e) {
+        var isOnlyAltKey = e.altKey && !e.ctrlKey; // the latter is true on windows for altGr
+
+        if (isOnlyAltKey || triggersReplacedCheckbox(e) || triggersMoveGroup(e)) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    }, false);
+
+    document.addEventListener("keyup", function(e) {
+        var isOnlyAltKey = e.altKey && !e.ctrlKey; // the latter is true on windows for altGr
+
+        if (isOnlyAltKey || triggersReplacedCheckbox(e) || triggersMoveGroup(e)) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    }, false);
+
+    function handleAccess(element) {
+        if (element.is('a') && '' !== element.attr('href')) {
+            document.location.href = element.attr('href');
+        } else if (element.is('button[type="submit"], input[type="radio"]')) {
+            element.click();
+        } else if (element.is('div') && element.hasClass('detail-control')) {
+            element.click();
+        } else {
+            element.click();
+        }
+    }
+
+    function handleFocus(element) {
+        if (element.is('input[type="text"]')) {
+            element.select();
+        }  else {
+            element.focus();
+
+            if (element.is('select')) {
+                // Actually open it; .click() does not work
+                element.siblings('.jcf-select').trigger('jcf-pointerdown');
+            }
+        }
+    }
+
+    document.addEventListener("keyup", function(e) {
+        var isOnlyAltKey = e.altKey && !e.ctrlKey; // the latter is true on windows for altGr
+
+        if (isOnlyAltKey) {
+            // TODO these cases are very special (ie side-effect)
+            //   - but at least the first two can be replace by (standard) Enter; without special handling here
+            if ('b' == e.key && -1 < allMoveables.index(e.target)) {
+                // Note on the page the form is positioned inside the tr
+                var form = $(e.target).parents('tr').find('form');
+                form.submit();
+            } else if ('ü' == e.key && $(e.target).is('button[type="submit"]')) {
+                // this is the delete button in a list (and thus submits the form)
+                $(e.target).click();
+            } else if ('ü' == e.key && $(e.target).is('select')) {
+                // closes the select dropdown
+                $(e.target).siblings('.jcf-select').trigger('jcf-pointerdown');
+            } else {
+                if (e.key in keyboardElements) {
+                    var element = $(keyboardElements[e.key]);
+
+                    var accessKey = element.attr('data-keyAccess');
+                    if (undefined != accessKey && accessKey == e.key) {
+                        handleAccess(element);
+                    } else {
+                        handleFocus(element);
+                    }
+                }
+            }
+        } else if (triggersMoveGroup(e)) {
+            var moveGroup = $(e.target).attr('data-keyMoveGroup');
+            var movers = $(groupedMoveables[moveGroup]);
+
+            // note "inArray" does not work here
+            var idx = movers.index(e.target);
+            var idxDiff = ('ArrowDown' == e.key || 'Down' == e.key) ? 1 : -1;
+
+            if (-1 < idx && idx + idxDiff < movers.length && idx + idxDiff > -1) {
+                var element = $(movers[idx + idxDiff]);
+
+                handleFocus(element);
+            }
+
+        } else if (triggersReplacedCheckbox(e)) {
+            $(e.target).click();
+        } else if ('Escape' == e.key) {
+            $(e.target).blur();
+        }
+    }, false);
+
+    function findAllKeyAccessible() {
+        var keyboardElements = [];
+
+        var accessibleElements = $('[data-keyAccess]');
+
+        // Add any element that has only data-keyFocus specified
+        var accessibleElementsFocus = $('[data-keyFocus]');
+        for (var i = 0; i < accessibleElementsFocus.length; i++) {
+            var another = accessibleElementsFocus[i];
+
+            if (undefined == $(another).attr('data-keyAccess')) {
+                accessibleElements.push(another);
+            }
+        }
+
+        // 
+        for (var i = 0; i < accessibleElements.length; i++) {
+            if ($(accessibleElements[i]).is(':visible')) {
+                
+                // elements can have both keys specified
+                var possibleAttributeKeys = ['data-keyAccess', 'data-keyFocus'];
+                for (var j = 0; j < possibleAttributeKeys.length; j++) {
+                    var attributeKey = possibleAttributeKeys[j];
+                    var key = $(accessibleElements[i]).attr(attributeKey);
+
+                    if (undefined != key) {
+                        key = key.toLowerCase();
+
+                        // note this might overwrite a previous one - this is mostly ok as e.g. a snippet can be included twice on a page
+                        keyboardElements[key] = accessibleElements[i];
+                    }
+                }
+            }
+        }
+
+        return keyboardElements;
+    }
+
+    function groupAllMovers(allMoveables) {
+        var groupedMoveables = [];
+
+        for (var i=0; i<allMoveables.length; i++) {
+            var group = $(allMoveables[i]).attr('data-keyMoveGroup');
+            if (false == (group in groupedMoveables)) {
+                groupedMoveables[group] = [];
+            }
+
+            if ($(allMoveables[i]).is(':visible')) {
+                groupedMoveables[group].push(allMoveables[i]);
+            }
+        }
+
+        return groupedMoveables;
+    }
+
+
+    // Build a lookup table out of elements that can be accessed by keyboard
+    var keyboardElements = findAllKeyAccessible();
+
+    // And a grouped list of all elements that can be navigated with cursor keys
+    var allMoveables = $('[data-keyMoveGroup]');
+    var groupedMoveables = groupAllMovers(allMoveables);
+
+
+    $('[data-defaultFocus="true"]').select();
+
+    if ($('.keyboard-help').length) {
+        // Add keyboard commands help text
+        var maxSingleLength = 22;
+        for (var key in keyboardElements) {
+            var elementText = $(keyboardElements[key]).attr('data-keyHelp');
+
+            if (undefined === elementText || 0 === elementText.length) {
+                elementText = $(keyboardElements[key]).text().trim();
+
+                if (maxSingleLength < elementText.length) {
+                    elementText = elementText.substring(0, maxSingleLength - 3) + '...';
+                }
+            }
+            $('.keyboard-help').append("<nobr>[" + key + "] " + elementText + ",</nobr> ");
+        }
+    }
+
+})(jQuery, window);

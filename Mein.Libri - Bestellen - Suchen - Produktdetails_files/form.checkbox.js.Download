@@ -1,0 +1,78 @@
+;(function ( $, window, document, undefined ) {
+
+    "use strict";
+
+    var pluginName = "esonoFormCheckbox";
+
+    function Plugin ( element ) {
+        this.element = $(element);
+        this._name = pluginName;
+        this.init();
+    }
+
+    $.extend(Plugin.prototype, {
+        init: function () {
+            var element = this.element;
+            var container = element.find('label');
+            var originalCheckbox = container.find('input');
+
+            var originalClass = undefined !== originalCheckbox.attr('class') ? originalCheckbox.attr('class') : '';
+
+            // only make new checkbox focusable (tabindex) if required; otherwise focus tricks are not possible (ie #37634)
+            var originalTabIndex = undefined !== element.attr('tabindex') ? element.attr('tabindex') : undefined;
+            var tabIndexText = undefined !== originalTabIndex ? 'tabindex="' + originalTabIndex + '"' : '';
+
+            var newCheckbox = $('<div class="replaced-checkbox '+ originalClass +'"' + tabIndexText + '><span class="replaced-input"></span><span>'+ container.text() +'</span></div>');
+
+            // Transfer possible data-key... and target attributes)
+            var data = originalCheckbox.data();
+            for (var key in data) {
+                var dataKey = 'data-'+key;
+                newCheckbox.attr(dataKey, data[key]);
+            }
+
+            if (true === originalCheckbox.prop('checked')) {
+                newCheckbox.addClass('checked');
+            }
+
+            newCheckbox.on('click', function(e) {
+                e.preventDefault(); // otherwise the (potential) surrounding label might be clicked too
+
+                if (true === originalCheckbox.prop('checked')) {
+                    originalCheckbox.prop('checked', false);
+                } else {
+                    originalCheckbox.prop('checked', true);
+                }
+
+                if (true === originalCheckbox.prop('checked')) {
+                    newCheckbox.addClass('checked');
+                } else {
+                    newCheckbox.removeClass('checked');
+                }
+
+                if (undefined !== originalCheckbox.attr('onchange')) {
+                    eval(originalCheckbox.attr('onchange'));
+                }
+            });
+            container.hide();
+            newCheckbox.appendTo(element);
+        }
+    });
+
+    $.fn[ pluginName ] = function () {
+        return this.each(function() {
+            if ( !$.data( this, "plugin_" + pluginName ) ) {
+                $.data( this, "plugin_" + pluginName, new Plugin( this ) );
+            }
+        });
+    };
+
+})( jQuery, window, document );
+
+(function ( $) {
+
+    "use strict";
+
+    $('.styled-checkbox').esonoFormCheckbox();
+
+})( jQuery, window );

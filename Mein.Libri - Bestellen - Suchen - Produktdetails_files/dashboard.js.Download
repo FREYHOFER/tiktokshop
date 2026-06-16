@@ -1,0 +1,16 @@
+;(function ( $, window, document, undefined ) {
+
+    "use strict";
+
+    $('.snippetModuleNavigationDashboard .block').on('click', function(){
+
+        $('.snippetModuleNavigationDashboard .block').removeClass('hovered');
+
+        var box = $(this);
+        var listElements = box.find('li');
+        if (listElements.length > 0) {
+            box.addClass('hovered');
+        }
+    });
+
+})( jQuery, window, document );

@@ -1,0 +1,37 @@
+/**
+* CSS styles to render download links and some basic wysiwyg issues
+*/
+
+.cmsdownloaditem a,
+.cmswysiwyg .cmsdownloaditem a,
+.cmsdownloaditem a:hover,
+.cmswysiwyg .cmsdownloaditem a:hover
+{
+    text-decoration: none;
+}
+
+.fiv-cla, .fiv-viv, .fiv-sqo {
+    font-size: 1.5em;
+}
+
+span.wysiwyg_cmsdownloaditem {
+    color: #0000EE !important;
+    text-decoration: underline !important;
+}
+
+a.cmsanchor {
+    padding: 0;
+    margin: 0;
+    height: 0;
+    line-height: 0;
+    width: 0;
+}
+
+span.cssmediacaption {
+    display: block;
+}
+
+a.cmsmediafullimagelink {
+    padding-left: 0;
+    background-image: none;
+}

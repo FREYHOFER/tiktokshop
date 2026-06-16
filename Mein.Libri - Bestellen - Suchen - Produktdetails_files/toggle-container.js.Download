@@ -1,0 +1,23 @@
+(function ( $) {
+
+    "use strict";
+
+    $('.toggle-container').each(function(){
+        var target = $('#' + $(this).data('target'));
+        if($(this).hasClass('active')) {
+            target.show();
+        } else {
+            target.hide();
+        }
+        $(this).on('click', function(e){
+            if($(this).hasClass('active')) {
+                $(this).removeClass('active');
+                target.hide();
+            } else {
+                $(this).addClass('active');
+                target.show();
+            }
+        });
+    });
+
+})( jQuery, window );
