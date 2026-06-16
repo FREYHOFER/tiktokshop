@@ -136,7 +136,7 @@ Laptop-unabhaengiger Lauf ueber GitHub Actions: `.github/workflows/tiktok-order-
 - `TIKTOK_ACCESS_TOKEN`
 - `TIKTOK_SHOP_CIPHER` falls TikTok mehrere Shops fuer den Token zurueckgibt
 
-Wenn neue Bestellungen vorbereitet werden, liegen die Dateien als Actions-Artifact `libri-order-packages-<run-id>` im jeweiligen Workflow-Lauf. Der Workflow commitet nur `.automation/order_state.json`, damit dieselbe Bestellung nicht bei jedem Poll erneut vorbereitet wird.
+Wenn neue Bestellungen vorbereitet werden, liegen die Dateien als Actions-Artifact `libri-order-packages-<run-id>` im jeweiligen Workflow-Lauf. Zusaetzlich erstellt der Workflow ein GitHub-Issue mit Link zum Workflow-Lauf, aber ohne Kundendaten im Issue-Text. Der Workflow commitet nur `.automation/order_state.json`, damit dieselbe Bestellung nicht bei jedem Poll erneut vorbereitet wird.
 
 Die Ergebnisse liegen in `outputs/order_automation/<timestamp>/<order-id>/`:
 
