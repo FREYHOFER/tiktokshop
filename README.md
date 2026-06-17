@@ -88,6 +88,49 @@ Mehrere Bild-URLs in `images` werden mit `|` getrennt.
 
 Die erzeugte Datei wird anschließend im Seller Center über `Products > Bulk listing` hochgeladen. Nach dem TikTok-Pre-Check nur veröffentlichen, wenn keine Fehler angezeigt werden; Fehlerberichte wieder in die Pipeline bzw. manuelle Datenkorrektur zurückführen.
 
+## Täglicher Mengenabgleich Libri -> TikTok
+
+`scripts/update_tiktok_quantities_from_libri.py` aktualisiert TikTok-Shop-Bestände aus dem aktuellen Libri-`Bestand`. Das Script sucht TikTok-Produkte mit Seller-SKU `LIBRI-{EAN}`, lädt die passende Mein.Libri-Produktdetailseite neu, liest den Bestand aus und setzt die TikTok-SKU-Menge über die TikTok Shop Open API.
+
+Vorher in `.env` setzen:
+
+- Libri: `LIBRI_CUSTOMER_NUMBER`, `LIBRI_USERNAME`, `LIBRI_PASSWORD`
+- TikTok: `TIKTOK_APP_KEY`, `TIKTOK_APP_SECRET`, `TIKTOK_ACCESS_TOKEN`
+- Optional: `TIKTOK_SHOP_CIPHER`, `TIKTOK_WAREHOUSE_ID`
+
+Sicherer Test ohne TikTok-Schreibzugriff:
+
+```powershell
+.\scripts\run_inventory_update_once.ps1 -DryRun -Limit 5
+```
+
+Einmaliger Live-Lauf:
+
+```powershell
+.\scripts\run_inventory_update_once.ps1
+```
+
+Täglichen Windows-Task installieren, standardmäßig um 06:00 Uhr lokaler Windows-Zeit:
+
+```powershell
+.\scripts\install_inventory_update_task.ps1 -RunAt 06:00
+```
+
+Laptop-unabhaengiger Live-Lauf ueber GitHub Actions: `.github/workflows/tiktok-inventory-update.yml` laeuft taeglich um `04:00 UTC` und kann manuell ueber den Actions-Tab gestartet werden. Bei manuellem Start koennen `dry_run` und `limit` gesetzt werden; der Zeitplan laeuft live und schreibt TikTok-Bestaende.
+
+Dafuer muessen in GitHub unter `Settings > Secrets and variables > Actions` diese Repository-Secrets gesetzt sein:
+
+- `LIBRI_CUSTOMER_NUMBER`
+- `LIBRI_USERNAME`
+- `LIBRI_PASSWORD`
+- `TIKTOK_APP_KEY`
+- `TIKTOK_APP_SECRET`
+- `TIKTOK_ACCESS_TOKEN`
+- `TIKTOK_SHOP_CIPHER` falls TikTok mehrere Shops fuer den Token zurueckgibt
+- `TIKTOK_WAREHOUSE_ID` falls der Projektstandard nicht passt
+
+Die Protokolle liegen in `outputs/inventory_updates/<timestamp>/inventory_update_log.csv`; bei GitHub Actions wird dieser Ordner als Artifact `tiktok-inventory-update-<run-id>` hochgeladen. Dort steht pro SKU, welche Libri-Menge gelesen wurde, welche TikTok-Menge vorher bekannt war und ob aktualisiert, übersprungen oder ein Fehler gemeldet wurde.
+
 ## Bestellautomation TikTok -> Libri
 
 Neue TikTok-Bestellungen werden mit `scripts/tiktok_order_automation.py` vorbereitet. Das Script liest entweder die TikTok Shop Open API oder testweise den neuesten Seller-Center-CSV-Export `Versandbereit Bestellung*.csv` aus Downloads.
