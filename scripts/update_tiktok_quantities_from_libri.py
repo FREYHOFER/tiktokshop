@@ -35,6 +35,7 @@ DEFAULT_OUTPUT_ROOT = Path("outputs") / "inventory_updates"
 DEFAULT_WAREHOUSE_ID = "7630853807695791895"
 DEFAULT_SELLER_SKU_PREFIX = "LIBRI-"
 DEFAULT_UPLOAD_LOG_STATUSES = {"created", "skipped_existing_sku"}
+DEFAULT_PRODUCT_STATUSES = "ACTIVATE,SELLER_DEACTIVATED,DRAFT,PENDING,FAILED"
 LOG_FIELDS = [
     "timestamp_utc",
     "ean",
@@ -348,8 +349,9 @@ def resolve_tiktok_skus(
     allowed_statuses = csv_values(args.product_statuses)
 
     if requested_seller_skus:
-        for start in range(0, len(requested_seller_skus), args.search_batch_size):
-            batch = requested_seller_skus[start : start + args.search_batch_size]
+        batch_size = min(max(args.search_batch_size, 1), 10)
+        for start in range(0, len(requested_seller_skus), batch_size):
+            batch = requested_seller_skus[start : start + batch_size]
             products = client.search_products(seller_skus=batch, page_size=max(args.page_size, len(batch)))
             for product in products:
                 for sku in product_skus(product, args.seller_sku_prefix, default_warehouse_id):
@@ -614,10 +616,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workbook", action="append", default=[], help="TikTok upload workbook source. Can be repeated.")
     parser.add_argument("--start-row", type=int, default=7, help="First workbook data row.")
     parser.add_argument("--discover-tiktok-products", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--product-statuses", default="", help="Optional comma-separated TikTok product statuses to include.")
+    parser.add_argument(
+        "--product-statuses",
+        default=DEFAULT_PRODUCT_STATUSES,
+        help="Comma-separated TikTok product statuses to include. Defaults skip deleted listings.",
+    )
     parser.add_argument("--page-size", type=int, default=50)
     parser.add_argument("--max-pages", type=int, default=0, help="Optional cap when discovering TikTok products.")
-    parser.add_argument("--search-batch-size", type=int, default=20)
+    parser.add_argument("--search-batch-size", type=int, default=10)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--refresh-libri", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--local-libri-dir", action="append", default=["libri_product_pages", "libri_bulk_pages"])
