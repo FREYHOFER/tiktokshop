@@ -9,7 +9,8 @@ on:
       - "requirements.txt"
       - "scripts/**"
   schedule:
-    - cron: "*/15 * * * *"
+    # GitHub cron uses UTC. In Germany this is 12:30 and 16:30 during summer time.
+    - cron: "30 10,14 * * *"
   workflow_dispatch:
 
 concurrency:
