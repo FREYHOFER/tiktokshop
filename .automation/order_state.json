@@ -1,3 +1,16 @@
 {
-  "prepared_orders": {}
+  "prepared_orders": {
+    "576911709489633938": {
+      "package_id": "1154163576531884690",
+      "prepared_at": "2026-06-19T15:10:33.974297+00:00",
+      "run_dir": "/home/runner/work/tiktokshop/tiktokshop/outputs/order_automation/20260619_151033",
+      "status": "prepared_with_warnings"
+    },
+    "576911709571816293": {
+      "package_id": "1154163581974584165",
+      "prepared_at": "2026-06-19T15:10:33.979907+00:00",
+      "run_dir": "/home/runner/work/tiktokshop/tiktokshop/outputs/order_automation/20260619_151033",
+      "status": "prepared_with_warnings"
+    }
+  }
 }
