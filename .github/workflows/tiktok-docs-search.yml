@@ -1,0 +1,49 @@
+name: TikTok docs search
+
+on:
+  workflow_dispatch:
+    inputs:
+      terms:
+        description: "Comma-separated search terms"
+        required: false
+        default: "mission,missions,task,tasks,campaign,campaigns,affiliate,creator,creator mission,seller mission"
+      url:
+        description: "TikTok docs URL"
+        required: false
+        default: "https://partner.tiktokshop.com/doc"
+
+permissions:
+  contents: read
+
+jobs:
+  search-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium --with-deps
+
+      - name: Search rendered TikTok docs
+        env:
+          SEARCH_TERMS: ${{ github.event.inputs.terms }}
+          TIKTOK_DOCS_URL: ${{ github.event.inputs.url }}
+          OUTPUT_DIR: outputs/tiktok_docs_search
+        run: node scripts/tiktok_docs_search.mjs
+
+      - name: Upload docs search result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tiktok-docs-search-${{ github.run_id }}
+          path: outputs/tiktok_docs_search/
+          retention-days: 14
