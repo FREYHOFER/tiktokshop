@@ -1,0 +1,94 @@
+name: TikTok mission endpoint test
+
+on:
+  workflow_dispatch:
+    inputs:
+      method:
+        description: "GET or POST"
+        required: true
+        default: "GET"
+      path:
+        description: "TikTok Shop API path, for example /promotion/202309/..."
+        required: true
+        default: ""
+      params_json:
+        description: "Optional JSON object for query params, for example {\"page_size\":20}"
+        required: false
+        default: "{}"
+      body_json:
+        description: "Optional JSON object for POST body"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  test-mission-endpoint:
+    runs-on: ubuntu-latest
+    environment: shop
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Create local env file
+        env:
+          LIBRI_CUSTOMER_NUMBER: ${{ secrets.LIBRI_CUSTOMER_NUMBER }}
+          TIKTOK_APP_KEY: ${{ secrets.TIKTOK_APP_KEY }}
+          TIKTOK_APP_SECRET: ${{ secrets.TIKTOK_APP_SECRET }}
+          TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
+          TIKTOK_SHOP_CIPHER: ${{ secrets.TIKTOK_SHOP_CIPHER }}
+          TIKTOK_MISSION_METHOD: ${{ github.event.inputs.method }}
+          TIKTOK_MISSION_API_PATH: ${{ github.event.inputs.path }}
+          TIKTOK_MISSION_PARAMS_JSON: ${{ github.event.inputs.params_json }}
+          TIKTOK_MISSION_BODY_JSON: ${{ github.event.inputs.body_json }}
+        run: |
+          python - <<'PY'
+          import os
+
+          keys = [
+              "LIBRI_CUSTOMER_NUMBER",
+              "TIKTOK_APP_KEY",
+              "TIKTOK_APP_SECRET",
+              "TIKTOK_ACCESS_TOKEN",
+              "TIKTOK_SHOP_CIPHER",
+              "TIKTOK_MISSION_METHOD",
+              "TIKTOK_MISSION_API_PATH",
+              "TIKTOK_MISSION_PARAMS_JSON",
+              "TIKTOK_MISSION_BODY_JSON",
+          ]
+
+          defaults = {
+              "TIKTOK_BASE_URL": "https://open-api.tiktokglobalshop.com",
+              "TIKTOK_API_VERSION": "202309",
+              "TIKTOK_INCLUDE_VERSION": "true",
+              "TIKTOK_ACCESS_TOKEN_IN_QUERY": "false",
+              "TIKTOK_SIGN_INCLUDE_BODY": "true",
+          }
+
+          with open(".env", "w", encoding="utf-8") as env_file:
+              for key in keys:
+                  value = os.environ.get(key, "")
+                  env_file.write(f"{key}={value}\n")
+              for key, value in defaults.items():
+                  env_file.write(f"{key}={value}\n")
+          PY
+
+      - name: Test mission endpoint
+        run: |
+          python scripts/tiktok_mission_endpoint_test.py \
+            --env .env \
+            --output outputs/mission_endpoint_test/result.json
+
+      - name: Upload sanitized result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tiktok-mission-endpoint-test-${{ github.run_id }}
+          path: outputs/mission_endpoint_test/
+          retention-days: 14
