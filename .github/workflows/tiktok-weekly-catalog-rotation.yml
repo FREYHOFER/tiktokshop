@@ -1,0 +1,145 @@
+name: TikTok weekly catalog rotation
+
+on:
+  schedule:
+    - cron: "30 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and audit the rotation without writing to TikTok"
+        type: boolean
+        default: true
+      replace_count:
+        description: "Maximum number of titles to replace"
+        type: number
+        default: 10
+
+concurrency:
+  group: tiktok-weekly-catalog-rotation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  rotate-catalog:
+    runs-on: ubuntu-latest
+    environment: shop
+    timeout-minutes: 120
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt Pillow
+
+      - name: Create local env file
+        env:
+          LIBRI_CUSTOMER_NUMBER: ${{ secrets.LIBRI_CUSTOMER_NUMBER }}
+          LIBRI_USERNAME: ${{ secrets.LIBRI_USERNAME }}
+          LIBRI_PASSWORD: ${{ secrets.LIBRI_PASSWORD }}
+          TIKTOK_APP_KEY: ${{ secrets.TIKTOK_APP_KEY }}
+          TIKTOK_APP_SECRET: ${{ secrets.TIKTOK_APP_SECRET }}
+          TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
+          TIKTOK_SHOP_CIPHER: ${{ secrets.TIKTOK_SHOP_CIPHER }}
+          TIKTOK_WAREHOUSE_ID: ${{ secrets.TIKTOK_WAREHOUSE_ID }}
+        run: |
+          python - <<'PY'
+          import os
+
+          defaults = {
+              "TIKTOK_BASE_URL": "https://open-api.tiktokglobalshop.com",
+              "TIKTOK_API_VERSION": "202309",
+              "TIKTOK_INCLUDE_VERSION": "true",
+              "TIKTOK_ACCESS_TOKEN_IN_QUERY": "false",
+              "TIKTOK_SIGN_INCLUDE_BODY": "true",
+          }
+          secret_keys = [
+              "LIBRI_CUSTOMER_NUMBER",
+              "LIBRI_USERNAME",
+              "LIBRI_PASSWORD",
+              "TIKTOK_APP_KEY",
+              "TIKTOK_APP_SECRET",
+              "TIKTOK_ACCESS_TOKEN",
+              "TIKTOK_SHOP_CIPHER",
+              "TIKTOK_WAREHOUSE_ID",
+          ]
+
+          with open(".env", "w", encoding="utf-8") as env_file:
+              for key in secret_keys:
+                  env_file.write(f"{key}={os.environ.get(key, '')}\n")
+              for key, value in defaults.items():
+                  env_file.write(f"{key}={value}\n")
+          PY
+
+      - name: Collect current Libri new releases
+        run: |
+          python scripts/collect_libri_candidates.py \
+            --env .env \
+            --output outputs/weekly_catalog_rotation/libri_new_releases.csv \
+            --limit 100 \
+            --limit-per-source 20 \
+            --source-label libri_novitaeten_belletristik_hardcover \
+            --source-label libri_novitaeten_belletristik_taschenbuch \
+            --source-label libri_novitaeten_krimi \
+            --source-label libri_novitaeten_scifi_fantasy \
+            --source-label libri_novitaeten_kinder_jugendbuch
+
+      - name: Fetch Libri product pages
+        run: |
+          python scripts/fetch_libri_product_pages.py \
+            --env .env \
+            --isbn-csv outputs/weekly_catalog_rotation/libri_new_releases.csv \
+            --output-dir outputs/weekly_catalog_rotation/libri_pages \
+            --limit 100
+
+      - name: Build checked TikTok upload workbook
+        run: |
+          python scripts/tiktok_libri_pipeline.py \
+            --workspace . \
+            --detail-glob "outputs/weekly_catalog_rotation/libri_pages/*.html" \
+            --bestseller-pdf none.pdf \
+            --manual-csv outputs/weekly_catalog_rotation/libri_new_releases.csv \
+            --output-dir outputs/weekly_catalog_rotation/upload_pack \
+            --limit 30
+
+      - name: Rotate catalog
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+          REPLACE_COUNT: ${{ inputs.replace_count || 10 }}
+        run: |
+          args=(
+            "--env" ".env"
+            "--new-workbook" "outputs/weekly_catalog_rotation/upload_pack/tiktok_upload_green.xlsx"
+            "--output-root" "outputs/catalog_rotation"
+            "--replace-count" "$REPLACE_COUNT"
+            "--save-mode" "LISTING"
+            "--retire-stock-threshold" "0"
+            "--retire-product-statuses" "ACTIVATE"
+            "--max-scan-pages" "10"
+            "--max-scan-skus" "500"
+          )
+
+          if [ "$EVENT_NAME" = "schedule" ] || [ "$DRY_RUN" != "true" ]; then
+            args+=("--live")
+          fi
+
+          python scripts/rotate_tiktok_catalog.py "${args[@]}"
+
+      - name: Upload rotation audit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tiktok-weekly-catalog-rotation-${{ github.run_id }}
+          path: |
+            outputs/weekly_catalog_rotation/libri_new_releases.csv
+            outputs/weekly_catalog_rotation/upload_pack/
+            outputs/catalog_rotation/
+          retention-days: 21

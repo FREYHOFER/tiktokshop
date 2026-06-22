@@ -136,13 +136,27 @@ def parse_article_blocks(decoded_html: str, source: Source, page: int, page_size
 def collect(args: argparse.Namespace) -> list[dict[str, str | int]]:
     opener = login(Path(args.env))
     collected: dict[str, dict[str, str | int]] = {}
+    requested_groups = {value.casefold() for value in args.source_group}
+    requested_krz = {value.casefold() for value in args.source_krz}
+    requested_labels = {value.casefold() for value in args.source_label}
+    sources = [
+        source
+        for source in SOURCES
+        if (not requested_groups or source.group.casefold() in requested_groups)
+        and (not requested_krz or source.krz.casefold() in requested_krz)
+        and (not requested_labels or source.label.casefold() in requested_labels)
+    ]
+    if not sources:
+        raise SystemExit("No Libri sources matched --source-group/--source-krz/--source-label.")
 
-    for source in SOURCES:
+    for source in sources:
         first_url = build_url(source, page=1, page_size=args.page_size)
         _, first_body = fetch(opener, first_url)
         decoded = html.unescape(first_body)
         total = parse_total(decoded) or args.page_size
         pages = min(source.max_pages, max(1, math.ceil(total / args.page_size)))
+        if args.limit_per_source:
+            pages = min(pages, max(1, math.ceil(args.limit_per_source / args.page_size)))
 
         for page in range(1, pages + 1):
             if page == 1:
@@ -151,6 +165,8 @@ def collect(args: argparse.Namespace) -> list[dict[str, str | int]]:
                 _, body = fetch(opener, build_url(source, page=page, page_size=args.page_size))
                 page_body = html.unescape(body)
             for row in parse_article_blocks(page_body, source, page, args.page_size):
+                if args.limit_per_source and int(row["source_rank"]) > args.limit_per_source:
+                    continue
                 ean = str(row["ean"])
                 score = (int(row["source_priority"]) * 10000) + int(row["source_rank"])
                 if ean not in collected:
@@ -200,6 +216,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", default="outputs/research_1000/libri_candidate_1000.csv")
     parser.add_argument("--limit", type=int, default=1000)
     parser.add_argument("--page-size", type=int, default=50)
+    parser.add_argument("--limit-per-source", type=int, default=0, help="Optional max candidates retained from each selected source.")
+    parser.add_argument("--source-group", action="append", default=[], help="Optional Libri source group filter, for example Novitaeten. Can be repeated.")
+    parser.add_argument("--source-krz", action="append", default=[], help="Optional exact Libri source code filter, for example NOVBH. Can be repeated.")
+    parser.add_argument("--source-label", action="append", default=[], help="Optional exact Libri source label filter. Can be repeated.")
     return parser
 
 
