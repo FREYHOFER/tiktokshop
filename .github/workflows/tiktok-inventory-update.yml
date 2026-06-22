@@ -86,6 +86,7 @@ jobs:
           args=(
             "--env" ".env"
             "--output-root" "outputs/inventory_updates"
+            "--product-statuses" "ACTIVATE,SELLER_DEACTIVATED"
           )
 
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DRY_RUN" = "true" ]; then
