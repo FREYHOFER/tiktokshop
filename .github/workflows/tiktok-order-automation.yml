@@ -115,7 +115,7 @@ jobs:
       - name: Prepare new orders
         if: steps.required-secrets.outputs.available == 'true'
         run: |
-          python scripts/tiktok_order_automation.py \
+          python scripts/tiktok_order_automation_ci.py \
             --env .env \
             --output-root outputs/order_automation \
             --state .automation/order_state.json \
