@@ -182,7 +182,7 @@ jobs:
           PY
 
       - name: Save processed-order state
-        if: success() && steps.required-secrets.outputs.available == 'true'
+        if: ${{ success() && steps.required-secrets.outputs.available == 'true' }}
         run: |
           if git diff --quiet -- .automation/order_state.json; then
             echo "No order-state changes."
