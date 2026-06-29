@@ -11,6 +11,18 @@
       "prepared_at": "2026-06-19T15:10:33.979907+00:00",
       "run_dir": "/home/runner/work/tiktokshop/tiktokshop/outputs/order_automation/20260619_151033",
       "status": "prepared_with_warnings"
+    },
+    "576916562950527767": {
+      "package_id": "1154189126043736855",
+      "prepared_at": "2026-06-29T16:49:56.888811+00:00",
+      "run_dir": "/home/runner/work/tiktokshop/tiktokshop/outputs/order_automation/20260629_164956",
+      "status": "prepared_with_warnings"
+    },
+    "576916605273217893": {
+      "package_id": "1154189404564790117",
+      "prepared_at": "2026-06-29T16:49:56.894558+00:00",
+      "run_dir": "/home/runner/work/tiktokshop/tiktokshop/outputs/order_automation/20260629_164956",
+      "status": "prepared_with_warnings"
     }
   }
 }
