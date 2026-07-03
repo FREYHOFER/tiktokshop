@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Exchange a TikTok OAuth authorization code for an access token and save it to .env.
+"""Exchange a TikTok OAuth authorization code for tokens and save them to .env.
 
 Usage:
   python scripts/exchange_tiktok_code.py --code <code> --env .env
 
-The script attempts a POST to the TikTok Shop token endpoint and writes
-`TIKTOK_ACCESS_TOKEN=<token>` into the provided env file.
+The script attempts a GET to the TikTok Shop token endpoint and writes
+`TIKTOK_ACCESS_TOKEN=<token>` and, when returned by TikTok,
+`TIKTOK_REFRESH_TOKEN=<token>` into the provided env file.
 """
 from __future__ import annotations
 
@@ -13,10 +14,14 @@ import argparse
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+
+SENSITIVE_KEY_PARTS = ("token", "secret", "password", "auth_code")
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -55,6 +60,20 @@ def write_env(path: Path, env: dict[str, str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def mask_sensitive(value):
+    if isinstance(value, dict):
+        masked = {}
+        for key, item in value.items():
+            if any(part in str(key).casefold() for part in SENSITIVE_KEY_PARTS):
+                masked[key] = "***"
+            else:
+                masked[key] = mask_sensitive(item)
+        return masked
+    if isinstance(value, list):
+        return [mask_sensitive(item) for item in value]
+    return value
+
+
 def exchange_code(app_key: str, app_secret: str, code: str, redirect_uri: str | None = None) -> dict:
     # Correct TikTok Shop API OAuth token endpoint (GET method).
     url = "https://auth.tiktok-shops.com/api/v2/token/get"
@@ -81,7 +100,7 @@ def exchange_code(app_key: str, app_secret: str, code: str, redirect_uri: str | 
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Exchange TikTok OAuth code for access token and write to .env")
+    parser = argparse.ArgumentParser(description="Exchange TikTok OAuth code for access/refresh tokens and write to .env")
     parser.add_argument("--code", required=True)
     parser.add_argument("--env", default=".env")
     parser.add_argument("--redirect-uri", default="http://127.0.0.1:8765/tiktok/callback")
@@ -97,27 +116,37 @@ def main(argv: list[str] | None = None) -> int:
         print("Missing app key/secret. Set TIKTOK_APP_KEY and TIKTOK_APP_SECRET in .env or pass --app-key/--app-secret.")
         return 2
 
-    print("Exchanging code for access token...")
+    print("Exchanging code for TikTok tokens...")
     result = exchange_code(app_key, app_secret, args.code, redirect_uri=args.redirect_uri)
-    # Token may live under data.access_token or access_token
-    token = None
-    if isinstance(result, dict):
-        data = result.get("data") if isinstance(result.get("data"), dict) else result
-        token = data.get("access_token") or data.get("accessToken") or result.get("access_token")
+    data = result.get("data") if isinstance(result.get("data"), dict) else result
+    if not isinstance(data, dict):
+        data = {}
+
+    token = data.get("access_token") or data.get("accessToken") or result.get("access_token")
+    refresh_token = data.get("refresh_token") or data.get("refreshToken") or result.get("refresh_token")
+    expires_in = data.get("access_token_expire_in") or data.get("accessTokenExpireIn") or data.get("expires_in")
+
     if not token:
-        print("Token not found in response:")
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print("Access token not found in response:")
+        print(json.dumps(mask_sensitive(result), ensure_ascii=False, indent=2))
         return 3
 
     print("Received access token. Writing to", env_path)
-    env["TIKTOK_ACCESS_TOKEN"] = token
-    # remove any leading/trailing quotes
-    env["TIKTOK_ACCESS_TOKEN"] = env["TIKTOK_ACCESS_TOKEN"].strip().strip('"')
+    env["TIKTOK_ACCESS_TOKEN"] = str(token).strip().strip('"')
+    if refresh_token:
+        env["TIKTOK_REFRESH_TOKEN"] = str(refresh_token).strip().strip('"')
+    if expires_in:
+        env["TIKTOK_ACCESS_TOKEN_EXPIRES_IN"] = str(expires_in).strip().strip('"')
+        try:
+            env["TIKTOK_ACCESS_TOKEN_EXPIRES_AT"] = str(int(time.time()) + int(float(str(expires_in))))
+        except ValueError:
+            pass
+
     backup = env_path.with_suffix(env_path.suffix + ".bak")
     if env_path.exists():
         env_path.rename(backup)
     write_env(env_path, env)
-    print("Wrote TIKTOK_ACCESS_TOKEN to", env_path)
+    print("Wrote TikTok token values to", env_path)
     print("Backup of original .env saved to", backup)
     return 0
 
