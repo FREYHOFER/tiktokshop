@@ -46,6 +46,7 @@ jobs:
           TIKTOK_APP_KEY: ${{ secrets.TIKTOK_APP_KEY }}
           TIKTOK_APP_SECRET: ${{ secrets.TIKTOK_APP_SECRET }}
           TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
+          TIKTOK_REFRESH_TOKEN: ${{ secrets.TIKTOK_REFRESH_TOKEN }}
           TIKTOK_SHOP_CIPHER: ${{ secrets.TIKTOK_SHOP_CIPHER }}
           TIKTOK_WAREHOUSE_ID: ${{ secrets.TIKTOK_WAREHOUSE_ID }}
         run: |
@@ -66,6 +67,7 @@ jobs:
               "TIKTOK_APP_KEY",
               "TIKTOK_APP_SECRET",
               "TIKTOK_ACCESS_TOKEN",
+              "TIKTOK_REFRESH_TOKEN",
               "TIKTOK_SHOP_CIPHER",
               "TIKTOK_WAREHOUSE_ID",
           ]
@@ -76,6 +78,9 @@ jobs:
               for key, value in defaults.items():
                   env_file.write(f"{key}={value}\n")
           PY
+
+      - name: Refresh TikTok access token
+        run: python scripts/refresh_tiktok_access_token.py --env .env
 
       - name: Update quantities from Libri
         env:
