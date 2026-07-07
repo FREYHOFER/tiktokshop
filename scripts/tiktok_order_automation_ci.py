@@ -19,6 +19,11 @@ def advice_for_error(message: str) -> str:
             "Add or update these GitHub environment secrets in the shop environment: "
             "TIKTOK_APP_KEY, TIKTOK_APP_SECRET and TIKTOK_ACCESS_TOKEN."
         )
+    if "missing values in .env" in lower and "libri" in lower:
+        return (
+            "Add or update these GitHub environment secrets in the shop environment: "
+            "LIBRI_CUSTOMER_NUMBER, LIBRI_USERNAME and LIBRI_PASSWORD."
+        )
     if "no authorized tiktok shops" in lower:
         return (
             "Create a new TikTok Shop access token for the correct app and shop, then update "
@@ -41,16 +46,23 @@ def advice_for_error(message: str) -> str:
         )
     if "shop_cipher" in lower:
         return "Check or set the GitHub environment secret TIKTOK_SHOP_CIPHER."
+    if "libri login failed" in lower:
+        return "Check LIBRI_CUSTOMER_NUMBER, LIBRI_USERNAME and LIBRI_PASSWORD in the shop environment."
+    if "libri basket is not empty" in lower:
+        return "Clear the Mein.Libri basket before the next automatic run."
 
     return (
-        "Open the failed Prepare new orders step and check the TikTok API error above. "
-        "Most likely fix: refresh TIKTOK_ACCESS_TOKEN and verify TIKTOK_SHOP_CIPHER."
+        "Open the failed Prepare new orders step and check the TikTok or Libri error above. "
+        "Most likely fix: refresh TikTok credentials or check Libri login credentials."
     )
 
 
 if __name__ == "__main__":
+    argv = sys.argv[1:]
+    if "--auto-submit-libri" not in argv:
+        argv.append("--auto-submit-libri")
     try:
-        raise SystemExit(main())
+        raise SystemExit(main(argv))
     except TikTokApiError as exc:
         message = str(exc)
         advice = advice_for_error(message)
