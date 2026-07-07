@@ -61,8 +61,6 @@ if __name__ == "__main__":
     argv = sys.argv[1:]
     if "--auto-submit-libri" not in argv:
         argv.append("--auto-submit-libri")
-    if "--rebuild" not in argv:
-        argv.append("--rebuild")
     try:
         raise SystemExit(main(argv))
     except TikTokApiError as exc:
