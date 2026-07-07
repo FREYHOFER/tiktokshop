@@ -34,6 +34,46 @@ def clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def first_value(source: dict[str, str], *keys: str) -> str:
+    for key in keys:
+        value = clean(source.get(key))
+        if value:
+            return value
+    return ""
+
+
+def country_name(value: str) -> str:
+    text = clean(value)
+    mapping = {
+        "DE": "Deutschland",
+        "DEU": "Deutschland",
+        "AT": "Österreich",
+        "AUT": "Österreich",
+        "CH": "Schweiz",
+        "CHE": "Schweiz",
+    }
+    return mapping.get(text.upper(), text or "Deutschland")
+
+
+def infer_city(*values: str) -> str:
+    combined = " ".join(clean(value) for value in values if clean(value))
+    if "Hamburg" in combined:
+        return "Hamburg"
+    if "Berlin" in combined:
+        return "Berlin"
+    return ""
+
+
+def read_single_csv_row(path: Path) -> dict[str, str]:
+    text = path.read_text(encoding="utf-8-sig", errors="replace")
+    try:
+        dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel
+    rows = list(csv.DictReader(text.splitlines(), dialect=dialect))
+    return rows[0] if rows else {}
+
+
 def read_order_dir(order_dir: Path) -> tuple[list[str], str, dict[str, str]]:
     """Read order EANs, reference, and customer data from order directory."""
     order_json = order_dir / "tiktok_order.json"
@@ -48,7 +88,8 @@ def read_order_dir(order_dir: Path) -> tuple[list[str], str, dict[str, str]]:
         raise SystemExit(f"Missing {address_csv}")
 
     order = json.loads(order_json.read_text(encoding="utf-8"))
-    reference = clean(order.get("buyer_username") or (order.get("address") or {}).get("name") or order.get("order_id"))
+    order_address = order.get("address") if isinstance(order.get("address"), dict) else {}
+    reference = clean(order.get("buyer_username") or order_address.get("name") or order.get("order_id"))
     reference = (reference + "; tiktokshop")[:80] if reference else "tiktokshop"
 
     # Read EANs
@@ -66,23 +107,34 @@ def read_order_dir(order_dir: Path) -> tuple[list[str], str, dict[str, str]]:
     if not eans:
         raise SystemExit("No EAN values found in Libri import CSV.")
 
-    # Read customer address
-    customer_data: dict[str, str] = {}
-    with address_csv.open("r", encoding="utf-8-sig", newline="") as fh:
-        rows = list(csv.DictReader(fh, delimiter=";"))
-        if rows:
-            row = rows[0]
-            customer_data = {
-                "name": clean(row.get("Name") or row.get("Nachname, Vorname") or ""),
-                "firma": clean(row.get("Firma") or ""),
-                "strasse": clean(row.get("Straße") or row.get("Straße, Nr.") or ""),
-                "plz": clean(row.get("PLZ") or ""),
-                "ort": clean(row.get("Ort") or row.get("Stadt") or ""),
-                "country": clean(row.get("Country") or row.get("Land") or "Deutschland"),
-            }
+    # Read customer address. The generated kundenadresse.csv uses English, lowercase headers and comma delimiters;
+    # older manual files may use German headers and semicolon delimiters.
+    row = read_single_csv_row(address_csv)
+    full_address = first_value(row, "full_address", "Full Address", "Adresse") or clean(order_address.get("full_address"))
+    district = first_value(row, "district", "District") or clean(order_address.get("district"))
+    state = first_value(row, "state", "State", "Bundesland") or clean(order_address.get("state"))
+    city = (
+        first_value(row, "city", "Ort", "Stadt", "City")
+        or clean(order_address.get("city"))
+        or infer_city(full_address, district, state)
+    )
 
-    if not customer_data.get("name"):
-        raise SystemExit("Missing customer name in kundenadresse.csv")
+    customer_data: dict[str, str] = {
+        "name": first_value(row, "name", "Name", "Nachname, Vorname") or clean(order_address.get("name")),
+        "firma": first_value(row, "firma", "Firma"),
+        "strasse": (
+            first_value(row, "street", "Straße", "Strasse", "Straße, Nr.", "Address Line 1")
+            or clean(order_address.get("street"))
+            or full_address
+        ),
+        "plz": first_value(row, "zipcode", "zip", "PLZ", "Postal Code") or clean(order_address.get("zipcode")),
+        "ort": city,
+        "country": country_name(first_value(row, "country", "Country", "Land") or clean(order_address.get("country"))),
+    }
+
+    missing = [label for label, key in [("Name", "name"), ("Straße", "strasse"), ("PLZ", "plz"), ("Ort", "ort")] if not customer_data.get(key)]
+    if missing:
+        raise SystemExit("Missing customer address fields in kundenadresse.csv/tiktok_order.json: " + ", ".join(missing))
 
     return eans, reference, customer_data
 
@@ -174,10 +226,7 @@ def fill_customer_data_and_submit(
     # Add button to submit
     payload["module_fnc[primary]"] = "submitOrder"
 
-    print("Submitting order to Libri with customer data:")
-    print(f"  Name: {customer_data['name']}")
-    print(f"  Address: {customer_data['strasse']}, {customer_data['plz']} {customer_data['ort']}")
-    print(f"  Country: {customer_data['country']}")
+    print("Submitting order to Libri with validated customer address fields.")
 
     try:
         _, response_html = fetch(opener, ORDER_PAGE_URL, payload)
