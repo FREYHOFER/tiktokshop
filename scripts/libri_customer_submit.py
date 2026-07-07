@@ -201,38 +201,28 @@ def post_customer_checkout_step(
 def fill_customer_data_and_submit(
     opener, step2_html: str, customer_data: dict[str, str], item_quantities: dict[str, str], output_dir: Path
 ) -> bool:
-    """Fill customer data form, select direct shipping, and submit order."""
+    """Fill customer data form and continue."""
     decoded = html.unescape(step2_html)
     token = csrf_token(decoded)
 
-    # Build payload with customer data
     payload: dict[str, str] = {
         "cmsauthenticitytoken": token,
-        # Select "Direktversand zum Kunden" (direct shipping to customer)
-        "data[addressSelection]": "shippingAddressSelection",
-        # Customer data fields (based on form field names from screenshots)
-        "data[shippingAddress][name]": customer_data["name"],
-        "data[shippingAddress][company]": customer_data["firma"],
-        "data[shippingAddress][street]": customer_data["strasse"],
-        "data[shippingAddress][zip]": customer_data["plz"],
-        "data[shippingAddress][city]": customer_data["ort"],
-        "data[shippingAddress][country]": customer_data["country"],
+        "module_fnc[secondary]": "processStep",
+        "data[shipping-type]": "drop",
+        "data[customer-drop][name]": customer_data["name"],
+        "data[customer-drop][company]": customer_data["firma"],
+        "data[customer-drop][address]": customer_data["strasse"],
+        "data[customer-drop][zip]": customer_data["plz"],
+        "data[customer-drop][city]": customer_data["ort"],
+        "data[customer-drop][country]": "1",
     }
 
-    # Add item quantities
-    for item_id, quantity in item_quantities.items():
-        payload[f"data[orderItems][{item_id}][quantity]"] = quantity
-
-    # Add button to submit
-    payload["module_fnc[primary]"] = "submitOrder"
-
-    print("Submitting order to Libri with validated customer address fields.")
+    print("Submitting Libri customer data.")
 
     try:
         _, response_html = fetch(opener, ORDER_PAGE_URL, payload)
         (output_dir / "libri_submit_response.html").write_text(response_html, encoding="utf-8")
 
-        # Check for success indicators
         if (
             "vielen Dank für Ihre Bestellung" in response_html
             or "Auftragsbestätigung" in response_html
