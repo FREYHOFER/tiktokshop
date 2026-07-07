@@ -92,7 +92,6 @@ def read_order_dir(order_dir: Path) -> tuple[list[str], str, dict[str, str]]:
     reference = clean(order.get("buyer_username") or order_address.get("name") or order.get("order_id"))
     reference = (reference + "; tiktokshop")[:80] if reference else "tiktokshop"
 
-    # Read EANs
     eans: list[str] = []
     with import_csv.open("r", encoding="utf-8-sig", newline="") as fh:
         for row in csv.DictReader(fh, delimiter=";"):
@@ -107,8 +106,6 @@ def read_order_dir(order_dir: Path) -> tuple[list[str], str, dict[str, str]]:
     if not eans:
         raise SystemExit("No EAN values found in Libri import CSV.")
 
-    # Read customer address. The generated kundenadresse.csv uses English, lowercase headers and comma delimiters;
-    # older manual files may use German headers and semicolon delimiters.
     row = read_single_csv_row(address_csv)
     full_address = first_value(row, "full_address", "Full Address", "Adresse") or clean(order_address.get("full_address"))
     district = first_value(row, "district", "District") or clean(order_address.get("district"))
@@ -150,9 +147,24 @@ def basket_is_empty(page_html: str) -> bool:
     return "Es befinden sich keine Artikel im Warenkorb" in page_html
 
 
+def basket_article_numbers(page_html: str) -> list[str]:
+    return re.findall(r"\b97[89]\d{10}\b", html.unescape(page_html))
+
+
+def basket_matches_expected(page_html: str, eans: list[str]) -> bool:
+    found = set(basket_article_numbers(page_html))
+    expected = set(eans)
+    return bool(found) and found == expected
+
+
 def add_eans_to_basket(opener, eans: list[str], output_dir: Path) -> str:
     """Add EANs to basket and return basket HTML."""
     _, page_html = fetch(opener, ORDER_PAGE_URL)
+    if not basket_is_empty(page_html):
+        if basket_matches_expected(page_html, eans):
+            (output_dir / "libri_add_to_basket_response.html").write_text(page_html, encoding="utf-8")
+            return page_html
+        raise SystemExit("Libri basket is not empty and does not match this TikTok order.")
     payload = {
         "module_fnc[primary]": "AddEanListToBasketFromTextField",
         "eanList": "\n".join(eans),
@@ -261,12 +273,10 @@ def main(argv: list[str] | None = None) -> int:
     _, page_html = fetch(opener, ORDER_PAGE_URL)
     (output_dir / "libri_initial_basket.html").write_text(page_html, encoding="utf-8")
 
-    if not args.allow_existing_basket and not basket_is_empty(page_html):
-        raise SystemExit(
-            "Libri basket is not empty. Clear it manually or rerun with --allow-existing-basket after checking it."
-        )
+    if not basket_is_empty(page_html) and not basket_matches_expected(page_html, eans):
+        raise SystemExit("Libri basket is not empty and does not match this TikTok order.")
 
-    print(f"Adding {len(eans)} items to basket...")
+    print(f"Adding or reusing {len(eans)} items in basket...")
     basket_html = add_eans_to_basket(opener, eans, output_dir)
 
     print(f"Moving to checkout with reference: {reference}")
