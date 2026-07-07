@@ -42,6 +42,8 @@ jobs:
         id: required-secrets
         env:
           LIBRI_CUSTOMER_NUMBER: ${{ secrets.LIBRI_CUSTOMER_NUMBER }}
+          LIBRI_USER: ${{ secrets.LIBRI_USERNAME }}
+          LIBRI_PASS: ${{ secrets.LIBRI_PASSWORD }}
           TIKTOK_APP_KEY: ${{ secrets.TIKTOK_APP_KEY }}
           TIKTOK_APP_SECRET: ${{ secrets.TIKTOK_APP_SECRET }}
           TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
@@ -53,6 +55,8 @@ jobs:
 
           required = [
               "LIBRI_CUSTOMER_NUMBER",
+              "LIBRI_USER",
+              "LIBRI_PASS",
               "TIKTOK_APP_KEY",
               "TIKTOK_APP_SECRET",
           ]
@@ -83,6 +87,8 @@ jobs:
         if: steps.required-secrets.outputs.available == 'true'
         env:
           LIBRI_CUSTOMER_NUMBER: ${{ secrets.LIBRI_CUSTOMER_NUMBER }}
+          LIBRI_USER: ${{ secrets.LIBRI_USERNAME }}
+          LIBRI_PASS: ${{ secrets.LIBRI_PASSWORD }}
           TIKTOK_APP_KEY: ${{ secrets.TIKTOK_APP_KEY }}
           TIKTOK_APP_SECRET: ${{ secrets.TIKTOK_APP_SECRET }}
           TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
@@ -110,6 +116,8 @@ jobs:
           ]
 
           with open(".env", "w", encoding="utf-8") as env_file:
+              env_file.write(f"LIBRI_USERNAME={os.environ.get('LIBRI_USER', '')}\n")
+              env_file.write(f"LIBRI_PASSWORD={os.environ.get('LIBRI_PASS', '')}\n")
               for key in secret_keys:
                   env_file.write(f"{key}={os.environ.get(key, '')}\n")
               for key, value in defaults.items():
