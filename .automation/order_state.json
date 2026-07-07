@@ -23,6 +23,12 @@
       "prepared_at": "2026-06-29T16:49:56.894558+00:00",
       "run_dir": "/home/runner/work/tiktokshop/tiktokshop/outputs/order_automation/20260629_164956",
       "status": "prepared_with_warnings"
+    },
+    "576920602882775881": {
+      "package_id": "1154212325749267273",
+      "prepared_at": "2026-07-07T16:20:32.982248+00:00",
+      "run_dir": "/home/runner/work/tiktokshop/tiktokshop/outputs/order_automation/20260707_162032",
+      "status": "prepared_with_warnings"
     }
   }
 }
