@@ -370,6 +370,7 @@ def fill_customer_data_and_submit(
         "data[customer-drop][zip]": customer_data["plz"],
         "data[customer-drop][city]": customer_data["ort"],
         "data[customer-drop][country]": "1",
+        "data[customer-drop][parcelDelivery]": "1",
     }
 
     print("Submitting Libri customer data.")
