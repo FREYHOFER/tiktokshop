@@ -296,15 +296,17 @@ def validate_confirmation_page(page_html: str, eans: list[str], customer_data: d
     if not Counter(basket_article_numbers(decoded)) == Counter(eans):
         raise SystemExit("Confirmation page does not show exactly the expected EAN(s).")
 
-    required_customer_values = [
-        customer_data["name"],
-        customer_data["strasse"],
-        customer_data["plz"],
-        customer_data["ort"],
+    required_customer_values = {
+        "name": customer_data["name"],
+        "street": customer_data["strasse"],
+        "zip": customer_data["plz"],
+        "city": customer_data["ort"],
+    }
+    missing_labels = [
+        label for label, value in required_customer_values.items() if normalized_text(value) not in text
     ]
-    missing_values = [value for value in required_customer_values if normalized_text(value) not in text]
-    if missing_values:
-        raise SystemExit("Confirmation page is missing expected customer value(s): " + ", ".join(missing_values))
+    if missing_labels:
+        raise SystemExit("Confirmation page is missing expected customer field(s): " + ", ".join(missing_labels))
 
 
 def parse_forms(page_html: str) -> list[dict[str, object]]:
