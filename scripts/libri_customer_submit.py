@@ -255,8 +255,8 @@ def parse_basket_items(page_html: str) -> dict[str, str]:
 
 def post_customer_checkout_step(
     opener, basket_html: str, reference: str, output_dir: Path
-) -> tuple[str, dict[str, str]]:
-    """Post checkout and reach customer data step. Return (response_html, item_quantities)."""
+) -> tuple[str, dict[str, str], str]:
+    """Post checkout and reach customer data step. Return (response_html, item_quantities, step_url)."""
     decoded = html.unescape(basket_html)
     token = csrf_token(decoded)
     item_quantities = parse_basket_items(decoded)
@@ -273,9 +273,10 @@ def post_customer_checkout_step(
         payload[f"item[{item_id}][order]"] = "1"
         payload[f"data[confirm][orderReference][positionReference][{item_id}]"] = reference
 
-    _, response_html = fetch(opener, ORDER_PAGE_URL, payload)
+    step_url, response_html = fetch(opener, ORDER_PAGE_URL, payload)
     (output_dir / "libri_customer_step2.html").write_text(response_html, encoding="utf-8")
-    return response_html, item_quantities
+    (output_dir / "libri_customer_step2_url.txt").write_text(step_url + "\n", encoding="utf-8")
+    return response_html, item_quantities, step_url
 
 
 def page_has_success_text(page_html: str) -> bool:
@@ -336,10 +337,10 @@ def choose_final_confirmation_payload(page_html: str) -> dict[str, str]:
     return candidates[0]
 
 
-def submit_final_confirmation(opener, confirm_html: str, output_dir: Path) -> bool:
+def submit_final_confirmation(opener, confirm_url: str, confirm_html: str, output_dir: Path) -> bool:
     payload = choose_final_confirmation_payload(confirm_html)
     print("Submitting final Libri confirmation.")
-    _, response_html = fetch(opener, ORDER_PAGE_URL, payload)
+    _, response_html = fetch(opener, confirm_url, payload)
     (output_dir / "libri_submit_response.html").write_text(response_html, encoding="utf-8")
     if page_has_success_text(response_html):
         print("✓ Order successfully submitted to Libri!")
@@ -351,6 +352,7 @@ def submit_final_confirmation(opener, confirm_html: str, output_dir: Path) -> bo
 def fill_customer_data_and_submit(
     opener,
     step2_html: str,
+    step2_url: str,
     customer_data: dict[str, str],
     item_quantities: dict[str, str],
     eans: list[str],
@@ -376,8 +378,9 @@ def fill_customer_data_and_submit(
     print("Submitting Libri customer data.")
 
     try:
-        _, confirm_html = fetch(opener, ORDER_PAGE_URL, payload)
+        confirm_url, confirm_html = fetch(opener, step2_url, payload)
         (output_dir / "libri_confirm_order.html").write_text(confirm_html, encoding="utf-8")
+        (output_dir / "libri_confirm_order_url.txt").write_text(confirm_url + "\n", encoding="utf-8")
 
         if page_has_success_text(confirm_html):
             (output_dir / "libri_submit_response.html").write_text(confirm_html, encoding="utf-8")
@@ -385,7 +388,7 @@ def fill_customer_data_and_submit(
             return True
 
         validate_confirmation_page(confirm_html, eans, customer_data)
-        return submit_final_confirmation(opener, confirm_html, output_dir)
+        return submit_final_confirmation(opener, confirm_url, confirm_html, output_dir)
     except Exception as e:
         print(f"✗ Error submitting order: {e}")
         return False
@@ -421,10 +424,10 @@ def main(argv: list[str] | None = None) -> int:
     basket_html = add_eans_to_basket(opener, eans, output_dir)
 
     print(f"Moving to checkout with reference: {reference}")
-    step2_html, item_quantities = post_customer_checkout_step(opener, basket_html, reference, output_dir)
+    step2_html, item_quantities, step2_url = post_customer_checkout_step(opener, basket_html, reference, output_dir)
 
     print(f"Filling customer data and submitting order...")
-    success = fill_customer_data_and_submit(opener, step2_html, customer_data, item_quantities, eans, output_dir)
+    success = fill_customer_data_and_submit(opener, step2_html, step2_url, customer_data, item_quantities, eans, output_dir)
 
     if success:
         print(f"Order submission completed. See {output_dir} for details.")
