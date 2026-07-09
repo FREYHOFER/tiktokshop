@@ -5,7 +5,8 @@ Workflow:
 1. Add prepared order EANs to Libri basket
 2. Fill customer data from kundenadresse.csv
 3. Select "Direktversand zum Kunden" (Direct shipping to customer)
-4. Submit final order to Libri
+4. Validate the Libri confirmation page
+5. Submit the final confirmation page to Libri
 
 Usage:
   python scripts/libri_customer_submit.py --order-dir outputs/order_automation/<run>/<order-id> --env .env
@@ -19,9 +20,9 @@ import html
 import json
 import re
 import sys
+from collections import Counter
+from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fetch_libri_product_pages import fetch, login  # noqa: E402
@@ -30,8 +31,75 @@ from fetch_libri_product_pages import fetch, login  # noqa: E402
 ORDER_PAGE_URL = "https://mein.libri.de/Bestellen/Auftragserfassung.html"
 
 
+class FormParser(HTMLParser):
+    """Small stdlib-only form parser for Libri confirmation pages."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.forms: list[dict[str, object]] = []
+        self._current: dict[str, object] | None = None
+        self._select_name = ""
+        self._select_value = ""
+        self._select_has_selected = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attrs_dict = {key: value or "" for key, value in attrs}
+        if tag == "form":
+            self._current = {
+                "method": attrs_dict.get("method", "post"),
+                "action": attrs_dict.get("action", "?"),
+                "fields": {},
+            }
+            return
+        if self._current is None:
+            return
+
+        fields = self._current["fields"]
+        assert isinstance(fields, dict)
+
+        if tag == "input":
+            name = attrs_dict.get("name", "")
+            if not name:
+                return
+            input_type = attrs_dict.get("type", "text").lower()
+            if input_type in {"submit", "button", "image", "file", "reset"}:
+                return
+            if input_type in {"checkbox", "radio"} and "checked" not in attrs_dict:
+                return
+            fields[name] = attrs_dict.get("value", "")
+        elif tag == "textarea":
+            name = attrs_dict.get("name", "")
+            if name:
+                fields.setdefault(name, "")
+        elif tag == "select":
+            self._select_name = attrs_dict.get("name", "")
+            self._select_value = ""
+            self._select_has_selected = False
+        elif tag == "option" and self._select_name:
+            value = attrs_dict.get("value", "")
+            if "selected" in attrs_dict or not self._select_has_selected:
+                self._select_value = value
+                self._select_has_selected = "selected" in attrs_dict
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "form" and self._current is not None:
+            self.forms.append(self._current)
+            self._current = None
+        elif tag == "select" and self._current is not None and self._select_name:
+            fields = self._current["fields"]
+            assert isinstance(fields, dict)
+            fields.setdefault(self._select_name, self._select_value)
+            self._select_name = ""
+            self._select_value = ""
+            self._select_has_selected = False
+
+
 def clean(value: object) -> str:
     return str(value or "").strip()
+
+
+def normalized_text(value: object) -> str:
+    return re.sub(r"\s+", " ", clean(value)).casefold()
 
 
 def first_value(source: dict[str, str], *keys: str) -> str:
@@ -152,8 +220,8 @@ def basket_article_numbers(page_html: str) -> list[str]:
 
 
 def basket_matches_expected(page_html: str, eans: list[str]) -> bool:
-    found = set(basket_article_numbers(page_html))
-    expected = set(eans)
+    found = Counter(basket_article_numbers(page_html))
+    expected = Counter(eans)
     return bool(found) and found == expected
 
 
@@ -210,10 +278,83 @@ def post_customer_checkout_step(
     return response_html, item_quantities
 
 
+def page_has_success_text(page_html: str) -> bool:
+    text = normalized_text(html.unescape(page_html))
+    success_markers = [
+        "vielen dank für ihre bestellung",
+        "auftragsbestätigung",
+        "bestellung erfolgreich",
+        "auftrag wurde erfasst",
+        "ihr auftrag wurde",
+    ]
+    return any(marker in text for marker in success_markers)
+
+
+def validate_confirmation_page(page_html: str, eans: list[str], customer_data: dict[str, str]) -> None:
+    decoded = html.unescape(page_html)
+    text = normalized_text(decoded)
+    if not Counter(basket_article_numbers(decoded)) == Counter(eans):
+        raise SystemExit("Confirmation page does not show exactly the expected EAN(s).")
+
+    required_customer_values = [
+        customer_data["name"],
+        customer_data["strasse"],
+        customer_data["plz"],
+        customer_data["ort"],
+    ]
+    missing_values = [value for value in required_customer_values if normalized_text(value) not in text]
+    if missing_values:
+        raise SystemExit("Confirmation page is missing expected customer value(s): " + ", ".join(missing_values))
+
+
+def parse_forms(page_html: str) -> list[dict[str, object]]:
+    parser = FormParser()
+    parser.feed(html.unescape(page_html))
+    return parser.forms
+
+
+def choose_final_confirmation_payload(page_html: str) -> dict[str, str]:
+    forms = parse_forms(page_html)
+    candidates: list[dict[str, str]] = []
+    for form in forms:
+        fields = form.get("fields", {})
+        if not isinstance(fields, dict):
+            continue
+        payload = {str(key): str(value) for key, value in fields.items()}
+        # Do not treat the customer-data page as the final order page.
+        if any(key.startswith("data[customer-drop]") or key.startswith("data[customer-pickup]") for key in payload):
+            continue
+        if any(key.startswith("module_fnc") or key == "cmsauthenticitytoken" for key in payload):
+            candidates.append(payload)
+
+    if not candidates:
+        raise SystemExit("Could not find a final confirmation form to submit.")
+    if len(candidates) > 1:
+        candidates.sort(key=lambda payload: ("cmsauthenticitytoken" in payload, len(payload)), reverse=True)
+    return candidates[0]
+
+
+def submit_final_confirmation(opener, confirm_html: str, output_dir: Path) -> bool:
+    payload = choose_final_confirmation_payload(confirm_html)
+    print("Submitting final Libri confirmation.")
+    _, response_html = fetch(opener, ORDER_PAGE_URL, payload)
+    (output_dir / "libri_submit_response.html").write_text(response_html, encoding="utf-8")
+    if page_has_success_text(response_html):
+        print("✓ Order successfully submitted to Libri!")
+        return True
+    print("⚠ Final response received but success was not confirmed. Check libri_submit_response.html")
+    return False
+
+
 def fill_customer_data_and_submit(
-    opener, step2_html: str, customer_data: dict[str, str], item_quantities: dict[str, str], output_dir: Path
+    opener,
+    step2_html: str,
+    customer_data: dict[str, str],
+    item_quantities: dict[str, str],
+    eans: list[str],
+    output_dir: Path,
 ) -> bool:
-    """Fill customer data form and continue."""
+    """Fill customer data, validate confirmation page, then submit final order."""
     decoded = html.unescape(step2_html)
     token = csrf_token(decoded)
 
@@ -232,19 +373,16 @@ def fill_customer_data_and_submit(
     print("Submitting Libri customer data.")
 
     try:
-        _, response_html = fetch(opener, ORDER_PAGE_URL, payload)
-        (output_dir / "libri_submit_response.html").write_text(response_html, encoding="utf-8")
+        _, confirm_html = fetch(opener, ORDER_PAGE_URL, payload)
+        (output_dir / "libri_confirm_order.html").write_text(confirm_html, encoding="utf-8")
 
-        if (
-            "vielen Dank für Ihre Bestellung" in response_html
-            or "Auftragsbestätigung" in response_html
-            or "Bestellung erfolgreich" in response_html
-        ):
+        if page_has_success_text(confirm_html):
+            (output_dir / "libri_submit_response.html").write_text(confirm_html, encoding="utf-8")
             print("✓ Order successfully submitted to Libri!")
             return True
-        else:
-            print("⚠ Response received but success not confirmed. Check libri_submit_response.html")
-            return False
+
+        validate_confirmation_page(confirm_html, eans, customer_data)
+        return submit_final_confirmation(opener, confirm_html, output_dir)
     except Exception as e:
         print(f"✗ Error submitting order: {e}")
         return False
@@ -283,7 +421,7 @@ def main(argv: list[str] | None = None) -> int:
     step2_html, item_quantities = post_customer_checkout_step(opener, basket_html, reference, output_dir)
 
     print(f"Filling customer data and submitting order...")
-    success = fill_customer_data_and_submit(opener, step2_html, customer_data, item_quantities, output_dir)
+    success = fill_customer_data_and_submit(opener, step2_html, customer_data, item_quantities, eans, output_dir)
 
     if success:
         print(f"Order submission completed. See {output_dir} for details.")
