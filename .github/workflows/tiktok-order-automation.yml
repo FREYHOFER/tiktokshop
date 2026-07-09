@@ -8,7 +8,6 @@ on:
       - ".github/workflows/tiktok-order-automation.yml"
       - "requirements.txt"
       - "scripts/**"
-      - ".automation/libri_order_state.json"
   schedule:
     # GitHub cron uses UTC. In Germany this is 09:30 during summer time and 08:30 during winter time.
     - cron: "30 7 * * *"
