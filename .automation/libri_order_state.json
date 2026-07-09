@@ -1,0 +1,15 @@
+{
+  "delivery_notes": {},
+  "libri_submissions": {
+    "576920602882775881": {
+      "eans": [
+        "9783492075312"
+      ],
+      "package_id": "1154212325749267273",
+      "source": "github_actions",
+      "status": "submitted",
+      "submitted_at": "2026-07-09T14:25:02+00:00",
+      "workflow_run_id": "29025234456"
+    }
+  }
+}
