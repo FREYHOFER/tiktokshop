@@ -8,9 +8,10 @@ on:
       - ".github/workflows/tiktok-order-automation.yml"
       - "requirements.txt"
       - "scripts/**"
+      - ".automation/libri_order_state.json"
   schedule:
-    # GitHub cron uses UTC. In Germany this is 12:30 and 16:30 during summer time.
-    - cron: "30 10,14 * * *"
+    # GitHub cron uses UTC. In Germany this is 09:30 during summer time and 08:30 during winter time.
+    - cron: "30 7 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -89,11 +90,15 @@ jobs:
           LIBRI_CUSTOMER_NUMBER: ${{ secrets.LIBRI_CUSTOMER_NUMBER }}
           LIBRI_USER: ${{ secrets.LIBRI_USERNAME }}
           LIBRI_PASS: ${{ secrets.LIBRI_PASSWORD }}
+          LIBRI_DELIVERY_NOTE_URLS: ${{ secrets.LIBRI_DELIVERY_NOTE_URLS }}
           TIKTOK_APP_KEY: ${{ secrets.TIKTOK_APP_KEY }}
           TIKTOK_APP_SECRET: ${{ secrets.TIKTOK_APP_SECRET }}
           TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
           TIKTOK_REFRESH_TOKEN: ${{ secrets.TIKTOK_REFRESH_TOKEN }}
           TIKTOK_SHOP_CIPHER: ${{ secrets.TIKTOK_SHOP_CIPHER }}
+          TIKTOK_SHIPPING_PROVIDER_ID: ${{ secrets.TIKTOK_SHIPPING_PROVIDER_ID }}
+          TIKTOK_SHIPPING_PROVIDER_NAME: ${{ secrets.TIKTOK_SHIPPING_PROVIDER_NAME }}
+          TIKTOK_SHIP_PACKAGE_PATH_TEMPLATE: ${{ secrets.TIKTOK_SHIP_PACKAGE_PATH_TEMPLATE }}
         run: |
           python - <<'PY'
           import os
@@ -108,11 +113,15 @@ jobs:
           }
           secret_keys = [
               "LIBRI_CUSTOMER_NUMBER",
+              "LIBRI_DELIVERY_NOTE_URLS",
               "TIKTOK_APP_KEY",
               "TIKTOK_APP_SECRET",
               "TIKTOK_ACCESS_TOKEN",
               "TIKTOK_REFRESH_TOKEN",
               "TIKTOK_SHOP_CIPHER",
+              "TIKTOK_SHIPPING_PROVIDER_ID",
+              "TIKTOK_SHIPPING_PROVIDER_NAME",
+              "TIKTOK_SHIP_PACKAGE_PATH_TEMPLATE",
           ]
 
           with open(".env", "w", encoding="utf-8") as env_file:
@@ -137,11 +146,55 @@ jobs:
             --state .automation/order_state.json \
             --skip-empty-runs
 
+      - name: Submit clean prepared orders to Libri
+        id: libri-submit
+        if: steps.required-secrets.outputs.available == 'true'
+        continue-on-error: true
+        run: |
+          python scripts/submit_clean_prepared_libri_orders.py \
+            --env .env \
+            --state .automation/libri_order_state.json \
+            --output-root outputs/order_automation
+
+      - name: Check Libri delivery notes and update TikTok
+        id: lieferschein-sync
+        if: steps.required-secrets.outputs.available == 'true'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/libri_lieferschein_sync.py \
+            --env .env \
+            --state .automation/libri_order_state.json \
+            --output-dir outputs/libri_lieferschein_sync \
+            --update-tiktok \
+            --create-issues
+
       - name: Check for prepared files
         id: prepared-files
-        if: steps.required-secrets.outputs.available == 'true'
+        if: always() && steps.required-secrets.outputs.available == 'true'
         run: |
           if [ -d outputs/order_automation ] && find outputs/order_automation -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check for Libri submission audit files
+        id: libri-audits
+        if: always() && steps.required-secrets.outputs.available == 'true'
+        run: |
+          if [ -d outputs/order_automation ] && find outputs/order_automation -path '*/libri_submission/*' -type f | grep -q .; then
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check for Lieferschein sync audit files
+        id: lieferschein-audits
+        if: always() && steps.required-secrets.outputs.available == 'true'
+        run: |
+          if [ -d outputs/libri_lieferschein_sync ] && find outputs/libri_lieferschein_sync -type f | grep -q .; then
             echo "created=true" >> "$GITHUB_OUTPUT"
           else
             echo "created=false" >> "$GITHUB_OUTPUT"
@@ -153,6 +206,22 @@ jobs:
         with:
           name: libri-order-packages-${{ github.run_id }}
           path: outputs/order_automation/
+          retention-days: 14
+
+      - name: Upload Libri submission audits
+        if: steps.libri-audits.outputs.created == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: libri-submission-audits-${{ github.run_id }}
+          path: outputs/order_automation/**/libri_submission/
+          retention-days: 14
+
+      - name: Upload Lieferschein sync audit
+        if: steps.lieferschein-audits.outputs.created == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: libri-lieferschein-sync-${{ github.run_id }}
+          path: outputs/libri_lieferschein_sync/
           retention-days: 14
 
       - name: Notify about prepared order package
@@ -177,7 +246,8 @@ jobs:
                   f"@{owner} a new TikTok order package is ready.\n\n"
                   f"Download the artifact `{artifact_name}` from this workflow run:\n"
                   f"{run_url}\n\n"
-                  "This issue intentionally contains no customer address or order details."
+                  "This issue intentionally contains no customer address or order details. "
+                  "Clean orders are submitted to Libri automatically; orders with warnings still need review."
               ),
           }
           request = urllib.request.Request(
@@ -197,17 +267,16 @@ jobs:
           print(f"Created notification issue: {issue['html_url']}")
           PY
 
-      - name: Save processed-order state
-        if: ${{ success() && steps.required-secrets.outputs.available == 'true' }}
+      - name: Save automation state
+        if: always() && steps.required-secrets.outputs.available == 'true'
         run: |
-          if git diff --quiet -- .automation/order_state.json; then
-            echo "No order-state changes."
-            exit 0
-          fi
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .automation/order_state.json
-          git commit -m "Update TikTok order automation state"
+          git add .automation/order_state.json .automation/libri_order_state.json
+          if git diff --cached --quiet; then
+            echo "No automation-state changes."
+            exit 0
+          fi
+          git commit -m "Update TikTok and Libri automation state"
           git pull --rebase
           git push
