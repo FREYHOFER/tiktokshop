@@ -2,11 +2,13 @@
 """Automate complete Libri order submission from TikTok order data.
 
 Workflow:
-1. Add prepared order EANs to Libri basket
-2. Fill customer data from kundenadresse.csv
-3. Select "Direktversand zum Kunden" (Direct shipping to customer)
-4. Validate the Libri confirmation page
-5. Submit the final confirmation page to Libri
+1. Check a persistent local state file so an order cannot be submitted twice
+2. Add prepared order EANs to Libri basket
+3. Fill customer data from kundenadresse.csv
+4. Select "Direktversand zum Kunden" (Direct shipping to customer)
+5. Validate the Libri confirmation page
+6. Submit the final confirmation page to Libri
+7. Record the successful submission in the persistent state file
 
 Usage:
   python scripts/libri_customer_submit.py --order-dir outputs/order_automation/<run>/<order-id> --env .env
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime as dt
 import html
 import json
 import re
@@ -29,6 +32,7 @@ from fetch_libri_product_pages import fetch, login  # noqa: E402
 
 
 ORDER_PAGE_URL = "https://mein.libri.de/Bestellen/Auftragserfassung.html"
+DEFAULT_STATE_PATH = Path(".automation") / "libri_order_state.json"
 
 
 class FormParser(HTMLParser):
@@ -102,6 +106,67 @@ def normalized_text(value: object) -> str:
     return re.sub(r"\s+", " ", clean(value)).casefold()
 
 
+def now_utc() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def load_state(path: Path) -> dict:
+    if not path.exists():
+        return {"libri_submissions": {}, "delivery_notes": {}}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    state.setdefault("libri_submissions", {})
+    state.setdefault("delivery_notes", {})
+    return state
+
+
+def save_state(path: Path, state: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def order_identity(order_dir: Path) -> tuple[str, str]:
+    order_json = order_dir / "tiktok_order.json"
+    if not order_json.exists():
+        return "", ""
+    try:
+        order = json.loads(order_json.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return "", ""
+    order_id = clean(order.get("order_id") or order.get("id"))
+    package_id = clean(order.get("package_id"))
+    return order_id, package_id
+
+
+def state_already_submitted(state: dict, order_id: str) -> bool:
+    if not order_id:
+        return False
+    entry = state.get("libri_submissions", {}).get(order_id, {})
+    return isinstance(entry, dict) and entry.get("status") == "submitted"
+
+
+def mark_submitted(state_path: Path, order_dir: Path, eans: list[str]) -> None:
+    order_id, package_id = order_identity(order_dir)
+    if not order_id:
+        print("No TikTok order_id found; Libri submission state was not updated.")
+        return
+    state = load_state(state_path)
+    submissions = state.setdefault("libri_submissions", {})
+    submissions[order_id] = {
+        "status": "submitted",
+        "submitted_at": now_utc(),
+        "package_id": package_id,
+        "eans": list(dict.fromkeys(eans)),
+        "source": "libri_customer_submit.py",
+    }
+    save_state(state_path, state)
+    print(f"Recorded Libri submission state for TikTok order {order_id}.")
+
+
 def first_value(source: dict[str, str], *keys: str) -> str:
     for key in keys:
         value = clean(source.get(key))
@@ -157,7 +222,7 @@ def read_order_dir(order_dir: Path) -> tuple[list[str], str, dict[str, str]]:
 
     order = json.loads(order_json.read_text(encoding="utf-8"))
     order_address = order.get("address") if isinstance(order.get("address"), dict) else {}
-    reference = clean(order.get("buyer_username") or order_address.get("name") or order.get("order_id"))
+    reference = clean(order.get("order_id") or order.get("buyer_username") or order_address.get("name"))
     reference = (reference + "; tiktokshop")[:80] if reference else "tiktokshop"
 
     eans: list[str] = []
@@ -398,6 +463,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Automate complete Libri order submission from TikTok order.")
     parser.add_argument("--order-dir", required=True, help="outputs/order_automation/<run>/<order-id>")
     parser.add_argument("--env", default=".env")
+    parser.add_argument("--state", default=str(DEFAULT_STATE_PATH), help="Persistent JSON state for submitted Libri orders.")
     parser.add_argument("--allow-existing-basket", action="store_true", help="Allow non-empty basket")
     return parser
 
@@ -405,11 +471,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     order_dir = Path(args.order_dir)
+    state_path = Path(args.state)
     output_dir = order_dir / "libri_submission"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Reading order from {order_dir}")
     eans, reference, customer_data = read_order_dir(order_dir)
+    order_id, _ = order_identity(order_dir)
+    state = load_state(state_path)
+    if state_already_submitted(state, order_id):
+        print(f"TikTok order {order_id} is already recorded as submitted to Libri. Skipping.")
+        return 0
 
     print(f"Logging in to Libri...")
     opener = login(Path(args.env))
@@ -430,6 +502,7 @@ def main(argv: list[str] | None = None) -> int:
     success = fill_customer_data_and_submit(opener, step2_html, step2_url, customer_data, item_quantities, eans, output_dir)
 
     if success:
+        mark_submitted(state_path, order_dir, eans)
         print(f"Order submission completed. See {output_dir} for details.")
         return 0
     else:
