@@ -23,9 +23,11 @@ import json
 import os
 import re
 import sys
+from typing import Any
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from urllib.parse import urljoin
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fetch_libri_product_pages import fetch, load_env_file, login  # noqa: E402
@@ -34,6 +36,7 @@ from update_tiktok_quantities_from_libri import TikTokInventoryClient  # noqa: E
 
 
 DEFAULT_OUTPUT_ROOT = Path("outputs") / "tiktok_shop_ops_audit"
+DEFAULT_LIBRI_BASE_URL = "https://mein.libri.de/"
 DEFAULT_LIBRI_DOCUMENT_URLS = [
     "https://mein.libri.de/Service/Lieferscheine.html",
     "https://mein.libri.de/Service/Belege.html",
@@ -47,6 +50,11 @@ DEFAULT_AFFILIATE_PROBE_PATHS = [
     "/affiliate_creator/202412/sample_applications/search",
 ]
 FIELDS = ["area", "status", "detail", "action"]
+ISSUE_TITLE = "TikTok/Libri integration needs configuration"
+ISSUE_FINGERPRINT = "tiktok-libri-integration-config"
+SENSITIVE_DETAIL_KEY_RE = re.compile(
+    r"(?i)([\"']?(?:access_token|refresh_token|app_secret|password|signature|authorization|cookie|phone|email|address|recipient|buyer|customer|shop_cipher)[\"']?\s*[:=]\s*)([\"'][^\"']*[\"']|[^,\s&}]+)"
+)
 
 
 def now_utc() -> str:
@@ -57,9 +65,80 @@ def csv_list(value: str) -> list[str]:
     return [part.strip() for part in re.split(r"[,\n]", clean(value)) if part.strip()]
 
 
+def configured_list(value: str) -> list[str]:
+    text = clean(value)
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+        return [clean(item).strip("\"'") for item in parsed if clean(item)]
+    return [part.strip().strip("\"'") for part in re.split(r"[,\n;]", text) if part.strip()]
+
+
+def normalize_libri_url(value: str) -> str:
+    text = clean(value).strip("\"'")
+    if not text:
+        return ""
+    if text.startswith(("http://", "https://")):
+        return text
+    if text.startswith("mein.libri.de"):
+        return "https://" + text
+    return urljoin(DEFAULT_LIBRI_BASE_URL, text)
+
+
+def libri_document_urls(env: dict[str, str]) -> list[str]:
+    configured = [normalize_libri_url(item) for item in configured_list(env_value(env, "LIBRI_DELIVERY_NOTE_URLS"))]
+    configured = [url for url in configured if url]
+    return list(dict.fromkeys(configured or DEFAULT_LIBRI_DOCUMENT_URLS))
+
+
+def path_version(path: str) -> str:
+    match = re.search(r"/(\d{6})(?:/|$)", path)
+    return match.group(1) if match else ""
+
+
+def audit_required_config(env: dict[str, str], rows: list[dict[str, str]]) -> None:
+    missing = [
+        key
+        for key in [
+            "LIBRI_CUSTOMER_NUMBER",
+            "LIBRI_USERNAME",
+            "LIBRI_PASSWORD",
+            "TIKTOK_APP_KEY",
+            "TIKTOK_APP_SECRET",
+        ]
+        if not env_value(env, key)
+    ]
+    if not env_value(env, "TIKTOK_ACCESS_TOKEN") and not env_value(env, "TIKTOK_REFRESH_TOKEN"):
+        missing.append("TIKTOK_ACCESS_TOKEN or TIKTOK_REFRESH_TOKEN")
+
+    if missing:
+        rows.append(
+            row(
+                "required_secrets",
+                "failed",
+                "Missing GitHub Environment secret(s): " + ", ".join(missing),
+                "Set the missing values in the shop environment; do not paste them into logs or issues.",
+            )
+        )
+
+
 def safe_detail(exc: Exception | str) -> str:
     text = str(exc)
-    text = re.sub(r"(?i)(access_token|app_secret|password|signature|sign)[^,\s}]+", r"\1=<redacted>", text)
+    text = re.sub(r"(?i)Bearer\s+[A-Za-z0-9._\-]+", "Bearer <redacted>", text)
+    text = SENSITIVE_DETAIL_KEY_RE.sub(
+        lambda match: match.group(1)
+        + (
+            f"{match.group(2)[0]}<redacted>{match.group(2)[0]}"
+            if match.group(2).startswith(("\"", "'"))
+            else "<redacted>"
+        ),
+        text,
+    )
+    text = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "<redacted-email>", text)
     text = re.sub(r"[A-Za-z0-9_\-]{35,}", "<redacted>", text)
     return text[:900]
 
@@ -115,18 +194,38 @@ def github_json_request(url: str, token: str, method: str = "GET", payload: dict
     return json.loads(body) if body else {}
 
 
-def find_existing_issue(repo: str, token: str, fingerprint: str) -> dict | None:
+def find_existing_issues(repo: str, token: str, fingerprint: str, title: str) -> list[dict[str, Any]]:
     marker = f"<!-- {fingerprint} -->"
     query = urllib.parse.urlencode({"state": "open", "per_page": "100"})
     issues = github_json_request(f"https://api.github.com/repos/{repo}/issues?{query}", token)
     if not isinstance(issues, list):
-        return None
+        return []
+    matches: list[dict[str, Any]] = []
     for issue in issues:
         if not isinstance(issue, dict) or "pull_request" in issue:
             continue
-        if marker in str(issue.get("body") or ""):
-            return issue
-    return None
+        if marker in str(issue.get("body") or "") or clean(issue.get("title")) == title:
+            matches.append(issue)
+    matches.sort(key=lambda issue: (marker not in str(issue.get("body") or ""), int(issue.get("number") or 0)))
+    return matches
+
+
+def close_duplicate_issue(repo: str, token: str, duplicate: dict[str, Any], primary_url: str) -> None:
+    number = duplicate.get("number")
+    if not number:
+        return
+    github_json_request(
+        f"https://api.github.com/repos/{repo}/issues/{number}/comments",
+        token,
+        method="POST",
+        payload={"body": f"Closing as a duplicate of the current integration configuration tracker: {primary_url}"},
+    )
+    github_json_request(
+        f"https://api.github.com/repos/{repo}/issues/{number}",
+        token,
+        method="PATCH",
+        payload={"state": "closed", "state_reason": "not_planned"},
+    )
 
 
 def create_issue_once(title: str, body: str, fingerprint: str) -> None:
@@ -137,15 +236,18 @@ def create_issue_once(title: str, body: str, fingerprint: str) -> None:
         return
     marker = f"<!-- {fingerprint} -->"
     try:
-        existing = find_existing_issue(repo, token, fingerprint)
-        if existing:
+        existing_issues = find_existing_issues(repo, token, fingerprint, title)
+        if existing_issues:
+            existing = existing_issues[0]
             issue_number = existing.get("number")
             github_json_request(
                 f"https://api.github.com/repos/{repo}/issues/{issue_number}",
                 token,
                 method="PATCH",
-                payload={"body": marker + "\n" + body},
+                payload={"title": title, "body": marker + "\n" + body},
             )
+            for duplicate in existing_issues[1:]:
+                close_duplicate_issue(repo, token, duplicate, str(existing.get("html_url") or ""))
             print(f"Updated existing issue: {existing.get('html_url')}")
             return
         issue = github_json_request(
@@ -160,7 +262,145 @@ def create_issue_once(title: str, body: str, fingerprint: str) -> None:
         print(f"Issue create/update failed ({fingerprint}): {type(exc).__name__}")
 
 
-def audit_tiktok_orders(env: dict[str, str], env_path: Path, rows: list[dict[str, str]]) -> TikTokShopClient | None:
+def find_values_by_key(source: Any, keys: set[str], depth: int = 0) -> list[str]:
+    if depth > 8:
+        return []
+    values: list[str] = []
+    if isinstance(source, dict):
+        for key, value in source.items():
+            if str(key) in keys:
+                if isinstance(value, dict):
+                    values.extend(find_values_by_key(value, {"id", "delivery_option_id"}, depth + 1))
+                elif isinstance(value, list):
+                    values.extend(find_values_by_key(value, keys, depth + 1))
+                else:
+                    item = clean(value)
+                    if item:
+                        values.append(item)
+            else:
+                values.extend(find_values_by_key(value, keys, depth + 1))
+    elif isinstance(source, list):
+        for item in source:
+            values.extend(find_values_by_key(item, keys, depth + 1))
+    return list(dict.fromkeys(values))
+
+
+def provider_label(provider: dict[str, Any]) -> str:
+    return clean(
+        provider.get("name")
+        or provider.get("shipping_provider_name")
+        or provider.get("provider_name")
+        or provider.get("display_name")
+    )
+
+
+def provider_id(provider: dict[str, Any]) -> str:
+    return clean(provider.get("id") or provider.get("shipping_provider_id") or provider.get("provider_id"))
+
+
+def extract_provider_candidates(source: Any, depth: int = 0) -> list[dict[str, str]]:
+    if depth > 8:
+        return []
+    candidates: list[dict[str, str]] = []
+    if isinstance(source, dict):
+        item_id = provider_id(source)
+        item_name = provider_label(source)
+        if item_id and item_name:
+            candidates.append({"id": item_id, "name": item_name})
+        for value in source.values():
+            candidates.extend(extract_provider_candidates(value, depth + 1))
+    elif isinstance(source, list):
+        for item in source:
+            candidates.extend(extract_provider_candidates(item, depth + 1))
+
+    deduped: dict[tuple[str, str], dict[str, str]] = {}
+    for candidate in candidates:
+        deduped.setdefault((candidate["id"], candidate["name"]), candidate)
+    return list(deduped.values())
+
+
+def shipping_provider_probe_paths(client: TikTokShopClient, delivery_option_ids: list[str]) -> list[tuple[str, dict[str, object]]]:
+    probes: list[tuple[str, dict[str, object]]] = []
+    for delivery_option_id in delivery_option_ids[:5]:
+        probes.extend(
+            [
+                (
+                    f"/logistics/{client.version}/delivery_options/{delivery_option_id}/shipping_providers",
+                    {},
+                ),
+                (
+                    f"/fulfillment/{client.version}/delivery_options/{delivery_option_id}/shipping_providers",
+                    {},
+                ),
+                (
+                    f"/logistics/{client.version}/shipping_providers",
+                    {"delivery_option_id": delivery_option_id},
+                ),
+            ]
+        )
+    probes.extend(
+        [
+            (f"/logistics/{client.version}/shipping_providers", {}),
+            (f"/fulfillment/{client.version}/shipping_providers", {}),
+        ]
+    )
+    seen: set[tuple[str, str]] = set()
+    unique: list[tuple[str, dict[str, object]]] = []
+    for path, params in probes:
+        marker = (path, json.dumps(params, sort_keys=True))
+        if marker not in seen:
+            seen.add(marker)
+            unique.append((path, params))
+    return unique
+
+
+def discover_shipping_provider_id(
+    client: TikTokShopClient,
+    env: dict[str, str],
+    orders: list[dict],
+    provider_name: str,
+) -> tuple[str, str]:
+    shop_cipher = client.ensure_shop_cipher()
+    delivery_option_ids = find_values_by_key(
+        orders,
+        {
+            "delivery_option",
+            "delivery_option_id",
+            "shipping_service",
+            "shipping_service_id",
+            "delivery_service",
+            "delivery_service_id",
+        },
+    )
+    errors: list[str] = []
+    for path, extra_params in shipping_provider_probe_paths(client, delivery_option_ids):
+        params = {"shop_cipher": shop_cipher, **extra_params}
+        try:
+            response = client.request("GET", path, params=params, body=None)
+        except Exception as exc:
+            errors.append(f"{path}: {safe_detail(exc)}")
+            continue
+        providers = extract_provider_candidates(response)
+        match = next(
+            (
+                provider
+                for provider in providers
+                if provider_name.casefold() in provider["name"].casefold()
+                or provider["name"].casefold() in provider_name.casefold()
+            ),
+            None,
+        )
+        if match:
+            return match["id"], f"{match['name']} via {path}"
+        if providers:
+            labels = ", ".join(f"{provider['name']} ({provider['id']})" for provider in providers[:5])
+            errors.append(f"{path}: DHL not found; available providers: {labels}")
+    if not delivery_option_ids:
+        errors.append("No delivery_option_id-like value was visible in current order data.")
+    return "", " | ".join(errors[-3:])[:900]
+
+
+def audit_tiktok_orders(env: dict[str, str], env_path: Path, rows: list[dict[str, str]]) -> tuple[TikTokShopClient | None, list[dict]]:
     try:
         client = TikTokShopClient(env, env_path)
         shop_cipher = client.ensure_shop_cipher()
@@ -169,10 +409,10 @@ def audit_tiktok_orders(env: dict[str, str], env_path: Path, rows: list[dict[str
         rows.append(row("tiktok_orders", "ok", f"Awaiting-shipment search returned {len(orders)} order(s)."))
         if not shop_cipher:
             rows.append(row("tiktok_shop_cipher", "warning", "Shop cipher was empty after auth.", "Set TIKTOK_SHOP_CIPHER."))
-        return client
+        return client, orders
     except Exception as exc:
         rows.append(row("tiktok_orders", "failed", safe_detail(exc), "Refresh TikTok token and check app scopes for order read access."))
-        return None
+        return None, []
 
 
 def audit_products(env: dict[str, str], env_path: Path, rows: list[dict[str, str]]) -> None:
@@ -200,12 +440,14 @@ def audit_libri(env: dict[str, str], env_path: Path, rows: list[dict[str, str]],
     try:
         opener = login(env_path)
         rows.append(row("libri_login", "ok", "Mein.Libri login works."))
-    except Exception as exc:
+    except BaseException as exc:
+        if isinstance(exc, KeyboardInterrupt):
+            raise
         rows.append(row("libri_login", "failed", safe_detail(exc), "Check LIBRI_CUSTOMER_NUMBER, LIBRI_USERNAME, LIBRI_PASSWORD."))
         return
 
-    configured = csv_list(env_value(env, "LIBRI_DELIVERY_NOTE_URLS"))
-    urls = configured or DEFAULT_LIBRI_DOCUMENT_URLS
+    configured = bool(configured_list(env_value(env, "LIBRI_DELIVERY_NOTE_URLS")))
+    urls = libri_document_urls(env)
     found_pages = 0
     for url in urls[:10]:
         try:
@@ -237,11 +479,25 @@ def audit_affiliate(env: dict[str, str], env_path: Path, rows: list[dict[str, st
     successes = 0
     failures: list[str] = []
     for path in paths[:6]:
-        try:
-            client.request("POST", path, params={"shop_cipher": shop_cipher, "page_size": 10}, body={})
-            successes += 1
-        except Exception as exc:
-            failures.append(f"{path}: {safe_detail(exc)}")
+        version = path_version(path)
+        base_params: dict[str, object] = {"page_size": 10}
+        if version:
+            base_params["version"] = version
+        param_variants: list[dict[str, object]] = []
+        if shop_cipher:
+            param_variants.append({**base_params, "shop_cipher": shop_cipher})
+        param_variants.append(dict(base_params))
+        last_error = ""
+        for params in param_variants:
+            try:
+                client.request("POST", path, params=params, body={})
+                successes += 1
+                last_error = ""
+                break
+            except Exception as exc:
+                last_error = safe_detail(exc)
+        if last_error:
+            failures.append(f"{path}: {last_error}")
     if successes:
         rows.append(row("affiliate_samples", "ok", f"{successes} affiliate/sample probe endpoint(s) responded successfully."))
     else:
@@ -261,6 +517,50 @@ def audit_fulfillment_config(env: dict[str, str], rows: list[dict[str, str]]) ->
         rows.append(row("tiktok_fulfillment_config", "warning", detail, "Set TIKTOK_SHIPPING_PROVIDER_NAME, usually DHL."))
 
 
+def audit_shipping_provider_id(
+    env: dict[str, str],
+    env_path: Path,
+    rows: list[dict[str, str]],
+    client: TikTokShopClient | None,
+    orders: list[dict],
+) -> None:
+    provider_name = env_value(env, "TIKTOK_SHIPPING_PROVIDER_NAME", "DHL")
+    provider_id_value = env_value(env, "TIKTOK_SHIPPING_PROVIDER_ID")
+    if provider_id_value:
+        rows.append(row("tiktok_shipping_provider_id", "ok", "TikTok shipping provider ID is configured."))
+        return
+    if not provider_name:
+        rows.append(row("tiktok_shipping_provider_id", "warning", "Shipping provider name is empty.", "Set TIKTOK_SHIPPING_PROVIDER_NAME to DHL."))
+        return
+    if client is None:
+        rows.append(row("tiktok_shipping_provider_id", "blocked", "TikTok auth/order audit did not produce a client.", "Fix TikTok API auth first."))
+        return
+
+    try:
+        discovered_id, detail = discover_shipping_provider_id(client, env, orders, provider_name)
+    except Exception as exc:
+        rows.append(row("tiktok_shipping_provider_id", "warning", safe_detail(exc), "Set TIKTOK_SHIPPING_PROVIDER_ID manually if TikTok fulfillment requires it."))
+        return
+    if discovered_id:
+        rows.append(
+            row(
+                "tiktok_shipping_provider_id",
+                "warning",
+                f"Discovered {provider_name} shipping provider ID candidate: {discovered_id}. Source: {detail}",
+                f"Set TIKTOK_SHIPPING_PROVIDER_ID to {discovered_id}.",
+            )
+        )
+    else:
+        rows.append(
+            row(
+                "tiktok_shipping_provider_id",
+                "warning",
+                detail or "DHL shipping provider ID was not discovered.",
+                "Use TikTok Seller Center/API logistics settings to confirm DHL's shipping provider ID.",
+            )
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Audit TikTok Shop and Libri automation integration coverage.")
     parser.add_argument("--env", default=".env")
@@ -276,8 +576,10 @@ def main(argv: list[str] | None = None) -> int:
     run_dir = Path(args.output_root) / dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     rows: list[dict[str, str]] = []
 
+    audit_required_config(env, rows)
     audit_fulfillment_config(env, rows)
-    audit_tiktok_orders(env, env_path, rows)
+    tiktok_client, orders = audit_tiktok_orders(env, env_path, rows)
+    audit_shipping_provider_id(env, env_path, rows, tiktok_client, orders)
     audit_products(env, env_path, rows)
     audit_affiliate(env, env_path, rows)
     audit_libri(env, env_path, rows, run_dir)
@@ -293,7 +595,7 @@ def main(argv: list[str] | None = None) -> int:
         ]
         for item in attention:
             body_lines.append(f"- **{item['area']}**: `{item['status']}` — {item['detail']} Action: {item.get('action', '')}")
-        create_issue_once("TikTok/Libri integration needs configuration", "\n".join(body_lines), "tiktok-libri-integration-config")
+        create_issue_once(ISSUE_TITLE, "\n".join(body_lines), ISSUE_FINGERPRINT)
 
     print(f"TikTok Shop integration audit complete: {len(attention)} item(s) need attention. Output: {run_dir}")
     return 1 if any(item["status"] == "failed" for item in attention) else 0
