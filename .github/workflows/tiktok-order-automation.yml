@@ -153,7 +153,8 @@ jobs:
         run: |
           python scripts/tiktok_shop_integration_audit.py \
             --env .env \
-            --output-root outputs/tiktok_shop_ops_audit
+            --output-root outputs/tiktok_shop_ops_audit \
+            --create-issues
 
       - name: Prepare new orders
         if: steps.required-secrets.outputs.available == 'true'
