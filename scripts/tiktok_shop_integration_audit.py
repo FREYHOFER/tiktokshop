@@ -23,13 +23,13 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fetch_libri_product_pages import fetch, load_env_file, login  # noqa: E402
-from tiktok_order_automation import TikTokApiError, TikTokShopClient, clean, env_value  # noqa: E402
+from tiktok_order_automation import TikTokShopClient, clean, env_value  # noqa: E402
 from update_tiktok_quantities_from_libri import TikTokInventoryClient  # noqa: E402
 
 
@@ -96,17 +96,12 @@ def write_outputs(run_dir: Path, rows: list[dict[str, str]]) -> None:
     (run_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def create_issue_once(title: str, body: str, fingerprint: str) -> None:
-    token = os.environ.get("GITHUB_TOKEN", "")
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
-    if not token or not repo:
-        print(f"Issue not created ({fingerprint}): missing GitHub token/repo.")
-        return
-    marker = f"<!-- {fingerprint} -->"
+def github_json_request(url: str, token: str, method: str = "GET", payload: dict | None = None) -> dict | list:
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
-        f"https://api.github.com/repos/{repo}/issues",
-        data=json.dumps({"title": title, "body": marker + "\n" + body}).encode("utf-8"),
-        method="POST",
+        url,
+        data=data,
+        method=method,
         headers={
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {token}",
@@ -115,12 +110,54 @@ def create_issue_once(title: str, body: str, fingerprint: str) -> None:
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        body = response.read().decode("utf-8")
+    return json.loads(body) if body else {}
+
+
+def find_existing_issue(repo: str, token: str, fingerprint: str) -> dict | None:
+    marker = f"<!-- {fingerprint} -->"
+    query = urllib.parse.urlencode({"state": "open", "per_page": "100"})
+    issues = github_json_request(f"https://api.github.com/repos/{repo}/issues?{query}", token)
+    if not isinstance(issues, list):
+        return None
+    for issue in issues:
+        if not isinstance(issue, dict) or "pull_request" in issue:
+            continue
+        if marker in str(issue.get("body") or ""):
+            return issue
+    return None
+
+
+def create_issue_once(title: str, body: str, fingerprint: str) -> None:
+    token = os.environ.get("GITHUB_TOKEN", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    if not token or not repo:
+        print(f"Issue not created ({fingerprint}): missing GitHub token/repo.")
+        return
+    marker = f"<!-- {fingerprint} -->"
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            issue = json.loads(response.read().decode("utf-8"))
-        print(f"Created issue: {issue.get('html_url')}")
+        existing = find_existing_issue(repo, token, fingerprint)
+        if existing:
+            issue_number = existing.get("number")
+            github_json_request(
+                f"https://api.github.com/repos/{repo}/issues/{issue_number}",
+                token,
+                method="PATCH",
+                payload={"body": marker + "\n" + body},
+            )
+            print(f"Updated existing issue: {existing.get('html_url')}")
+            return
+        issue = github_json_request(
+            f"https://api.github.com/repos/{repo}/issues",
+            token,
+            method="POST",
+            payload={"title": title, "body": marker + "\n" + body},
+        )
+        if isinstance(issue, dict):
+            print(f"Created issue: {issue.get('html_url')}")
     except Exception as exc:
-        print(f"Issue creation failed ({fingerprint}): {type(exc).__name__}")
+        print(f"Issue create/update failed ({fingerprint}): {type(exc).__name__}")
 
 
 def audit_tiktok_orders(env: dict[str, str], env_path: Path, rows: list[dict[str, str]]) -> TikTokShopClient | None:
