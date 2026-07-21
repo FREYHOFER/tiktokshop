@@ -95,9 +95,11 @@ jobs:
           TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
           TIKTOK_REFRESH_TOKEN: ${{ secrets.TIKTOK_REFRESH_TOKEN }}
           TIKTOK_SHOP_CIPHER: ${{ secrets.TIKTOK_SHOP_CIPHER }}
+          TIKTOK_WAREHOUSE_ID: ${{ secrets.TIKTOK_WAREHOUSE_ID }}
           TIKTOK_SHIPPING_PROVIDER_ID: ${{ secrets.TIKTOK_SHIPPING_PROVIDER_ID }}
           TIKTOK_SHIPPING_PROVIDER_NAME: ${{ secrets.TIKTOK_SHIPPING_PROVIDER_NAME }}
           TIKTOK_SHIP_PACKAGE_PATH_TEMPLATE: ${{ secrets.TIKTOK_SHIP_PACKAGE_PATH_TEMPLATE }}
+          TIKTOK_AFFILIATE_AUDIT_PATHS: ${{ secrets.TIKTOK_AFFILIATE_AUDIT_PATHS }}
         run: |
           python - <<'PY'
           import os
@@ -109,6 +111,8 @@ jobs:
               "TIKTOK_INCLUDE_VERSION": "true",
               "TIKTOK_ACCESS_TOKEN_IN_QUERY": "false",
               "TIKTOK_SIGN_INCLUDE_BODY": "true",
+              "TIKTOK_SHIPPING_PROVIDER_NAME": "DHL",
+              "TIKTOK_SHIP_PACKAGE_PATH_TEMPLATE": "/fulfillment/{version}/packages/{package_id}/ship",
           }
           secret_keys = [
               "LIBRI_CUSTOMER_NUMBER",
@@ -118,23 +122,38 @@ jobs:
               "TIKTOK_ACCESS_TOKEN",
               "TIKTOK_REFRESH_TOKEN",
               "TIKTOK_SHOP_CIPHER",
+              "TIKTOK_WAREHOUSE_ID",
               "TIKTOK_SHIPPING_PROVIDER_ID",
               "TIKTOK_SHIPPING_PROVIDER_NAME",
               "TIKTOK_SHIP_PACKAGE_PATH_TEMPLATE",
+              "TIKTOK_AFFILIATE_AUDIT_PATHS",
           ]
 
           with open(".env", "w", encoding="utf-8") as env_file:
               env_file.write(f"LIBRI_USERNAME={os.environ.get('LIBRI_USER', '')}\n")
               env_file.write(f"LIBRI_PASSWORD={os.environ.get('LIBRI_PASS', '')}\n")
               for key in secret_keys:
-                  env_file.write(f"{key}={os.environ.get(key, '')}\n")
-              for key, value in defaults.items():
+                  value = os.environ.get(key, "") or defaults.get(key, "")
                   env_file.write(f"{key}={value}\n")
+              for key, value in defaults.items():
+                  if key not in secret_keys:
+                      env_file.write(f"{key}={value}\n")
           PY
 
       - name: Refresh TikTok access token
         if: steps.required-secrets.outputs.available == 'true'
         run: python scripts/refresh_tiktok_access_token.py --env .env
+
+      - name: Audit TikTok and Libri integration
+        id: integration-audit
+        if: steps.required-secrets.outputs.available == 'true'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/tiktok_shop_integration_audit.py \
+            --env .env \
+            --output-root outputs/tiktok_shop_ops_audit
 
       - name: Prepare new orders
         if: steps.required-secrets.outputs.available == 'true'
@@ -199,6 +218,16 @@ jobs:
             echo "created=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check for integration audit files
+        id: integration-audits
+        if: always() && steps.required-secrets.outputs.available == 'true'
+        run: |
+          if [ -d outputs/tiktok_shop_ops_audit ] && find outputs/tiktok_shop_ops_audit -type f | grep -q .; then
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload prepared Libri files
         if: steps.prepared-files.outputs.created == 'true'
         uses: actions/upload-artifact@v7
@@ -221,6 +250,14 @@ jobs:
         with:
           name: libri-lieferschein-sync-${{ github.run_id }}
           path: outputs/libri_lieferschein_sync/
+          retention-days: 14
+
+      - name: Upload integration audit
+        if: steps.integration-audits.outputs.created == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tiktok-shop-integration-audit-${{ github.run_id }}
+          path: outputs/tiktok_shop_ops_audit/
           retention-days: 14
 
       - name: Notify about prepared order package
