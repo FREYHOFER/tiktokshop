@@ -12,6 +12,11 @@ on:
     # GitHub cron uses UTC. In Germany this is 09:30 during summer time and 08:30 during winter time.
     - cron: "30 7 * * *"
   workflow_dispatch:
+    inputs:
+      audit_only:
+        description: "Run only setup, token refresh, read-only audit, and audit upload"
+        type: boolean
+        default: true
 
 concurrency:
   group: tiktok-order-automation
@@ -83,8 +88,17 @@ jobs:
               )
           PY
 
+      - name: Determine run mode
+        id: run-mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.audit_only }}" = "true" ]; then
+            echo "mutating=false" >> "$GITHUB_OUTPUT"
+            echo "Manual audit-only run: order preparation, Libri submission, TikTok fulfillment updates, and state commits are disabled."
+          else
+            echo "mutating=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create local env file
-        if: steps.required-secrets.outputs.available == 'true'
         env:
           LIBRI_CUSTOMER_NUMBER: ${{ secrets.LIBRI_CUSTOMER_NUMBER }}
           LIBRI_USER: ${{ secrets.LIBRI_USERNAME }}
@@ -141,12 +155,13 @@ jobs:
           PY
 
       - name: Refresh TikTok access token
+        id: refresh-token
         if: steps.required-secrets.outputs.available == 'true'
+        continue-on-error: true
         run: python scripts/refresh_tiktok_access_token.py --env .env
 
       - name: Audit TikTok and Libri integration
         id: integration-audit
-        if: steps.required-secrets.outputs.available == 'true'
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -157,7 +172,7 @@ jobs:
             --create-issues
 
       - name: Prepare new orders
-        if: steps.required-secrets.outputs.available == 'true'
+        if: steps.required-secrets.outputs.available == 'true' && steps.refresh-token.outcome == 'success' && steps.run-mode.outputs.mutating == 'true'
         run: |
           python scripts/tiktok_order_automation_ci.py \
             --env .env \
@@ -167,7 +182,7 @@ jobs:
 
       - name: Submit clean prepared orders to Libri
         id: libri-submit
-        if: steps.required-secrets.outputs.available == 'true'
+        if: steps.required-secrets.outputs.available == 'true' && steps.refresh-token.outcome == 'success' && steps.run-mode.outputs.mutating == 'true'
         continue-on-error: true
         run: |
           python scripts/submit_clean_prepared_libri_orders.py \
@@ -177,7 +192,7 @@ jobs:
 
       - name: Check Libri delivery notes and update TikTok
         id: lieferschein-sync
-        if: steps.required-secrets.outputs.available == 'true'
+        if: steps.required-secrets.outputs.available == 'true' && steps.refresh-token.outcome == 'success' && steps.run-mode.outputs.mutating == 'true'
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -191,7 +206,7 @@ jobs:
 
       - name: Check for prepared files
         id: prepared-files
-        if: always() && steps.required-secrets.outputs.available == 'true'
+        if: always() && steps.required-secrets.outputs.available == 'true' && steps.run-mode.outputs.mutating == 'true'
         run: |
           if [ -d outputs/order_automation ] && find outputs/order_automation -mindepth 1 -maxdepth 1 -type d | grep -q .; then
             echo "created=true" >> "$GITHUB_OUTPUT"
@@ -201,7 +216,7 @@ jobs:
 
       - name: Check for Libri submission audit files
         id: libri-audits
-        if: always() && steps.required-secrets.outputs.available == 'true'
+        if: always() && steps.required-secrets.outputs.available == 'true' && steps.run-mode.outputs.mutating == 'true'
         run: |
           if [ -d outputs/order_automation ] && find outputs/order_automation -path '*/libri_submission/*' -type f | grep -q .; then
             echo "created=true" >> "$GITHUB_OUTPUT"
@@ -211,7 +226,7 @@ jobs:
 
       - name: Check for Lieferschein sync audit files
         id: lieferschein-audits
-        if: always() && steps.required-secrets.outputs.available == 'true'
+        if: always() && steps.required-secrets.outputs.available == 'true' && steps.run-mode.outputs.mutating == 'true'
         run: |
           if [ -d outputs/libri_lieferschein_sync ] && find outputs/libri_lieferschein_sync -type f | grep -q .; then
             echo "created=true" >> "$GITHUB_OUTPUT"
@@ -221,7 +236,7 @@ jobs:
 
       - name: Check for integration audit files
         id: integration-audits
-        if: always() && steps.required-secrets.outputs.available == 'true'
+        if: always()
         run: |
           if [ -d outputs/tiktok_shop_ops_audit ] && find outputs/tiktok_shop_ops_audit -type f | grep -q .; then
             echo "created=true" >> "$GITHUB_OUTPUT"
@@ -230,7 +245,7 @@ jobs:
           fi
 
       - name: Upload prepared Libri files
-        if: steps.prepared-files.outputs.created == 'true'
+        if: always() && steps.prepared-files.outputs.created == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: libri-order-packages-${{ github.run_id }}
@@ -238,7 +253,7 @@ jobs:
           retention-days: 14
 
       - name: Upload Libri submission audits
-        if: steps.libri-audits.outputs.created == 'true'
+        if: always() && steps.libri-audits.outputs.created == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: libri-submission-audits-${{ github.run_id }}
@@ -246,7 +261,7 @@ jobs:
           retention-days: 14
 
       - name: Upload Lieferschein sync audit
-        if: steps.lieferschein-audits.outputs.created == 'true'
+        if: always() && steps.lieferschein-audits.outputs.created == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: libri-lieferschein-sync-${{ github.run_id }}
@@ -254,7 +269,7 @@ jobs:
           retention-days: 14
 
       - name: Upload integration audit
-        if: steps.integration-audits.outputs.created == 'true'
+        if: always() && steps.integration-audits.outputs.created == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: tiktok-shop-integration-audit-${{ github.run_id }}
@@ -305,7 +320,7 @@ jobs:
           PY
 
       - name: Save automation state
-        if: always() && steps.required-secrets.outputs.available == 'true'
+        if: always() && steps.required-secrets.outputs.available == 'true' && steps.run-mode.outputs.mutating == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
