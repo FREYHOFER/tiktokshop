@@ -28,6 +28,7 @@ from tiktok_order_automation import TikTokApiError, TikTokShopClient, clean, env
 
 DEFAULT_STATE_PATH = Path(".automation") / "libri_order_state.json"
 DEFAULT_OUTPUT_DIR = Path("outputs") / "libri_lieferschein_sync"
+DEFAULT_LIBRI_BASE_URL = "https://mein.libri.de/"
 DEFAULT_DOCUMENT_URLS = [
     "https://mein.libri.de/Service/Lieferscheine.html",
     "https://mein.libri.de/Service/Belege.html",
@@ -50,6 +51,30 @@ def normalize(value: object) -> str:
     return re.sub(r"\s+", " ", clean(value)).casefold()
 
 
+def configured_list(value: str) -> list[str]:
+    text = clean(value)
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+        return [clean(item).strip("\"'") for item in parsed if clean(item)]
+    return [part.strip().strip("\"'") for part in re.split(r"[,\n;]", text) if part.strip()]
+
+
+def normalize_document_url(value: str) -> str:
+    text = clean(value).strip("\"'")
+    if not text:
+        return ""
+    if text.startswith(("http://", "https://")):
+        return text
+    if text.startswith("mein.libri.de"):
+        return "https://" + text
+    return urljoin(DEFAULT_LIBRI_BASE_URL, text)
+
+
 def load_state(path: Path) -> dict:
     if not path.exists():
         return {"libri_submissions": {}, "delivery_notes": {}}
@@ -70,10 +95,9 @@ def save_state(path: Path, state: dict) -> None:
 
 
 def document_urls(env: dict[str, str]) -> list[str]:
-    configured = env_value(env, "LIBRI_DELIVERY_NOTE_URLS")
-    if configured:
-        return [part.strip() for part in re.split(r"[,\n]", configured) if part.strip()]
-    return DEFAULT_DOCUMENT_URLS
+    configured = [normalize_document_url(item) for item in configured_list(env_value(env, "LIBRI_DELIVERY_NOTE_URLS"))]
+    configured = [url for url in configured if url]
+    return list(dict.fromkeys(configured or DEFAULT_DOCUMENT_URLS))
 
 
 def safe_file_name(value: str) -> str:
@@ -293,7 +317,27 @@ def main(argv: list[str] | None = None) -> int:
         write_summary(output_dir / "summary.csv", [])
         return 0
 
-    opener = login(env_path)
+    try:
+        opener = login(env_path)
+    except BaseException as exc:
+        if isinstance(exc, KeyboardInterrupt):
+            raise
+        detail = str(exc).splitlines()[0][:240]
+        rows = [
+            {
+                "order_id": order_id,
+                "package_id": clean(submission.get("package_id")),
+                "delivery_note_status": "login_failed",
+                "tracking_status": "not_checked",
+                "tiktok_status": "not_updated",
+                "detail": detail or "Libri login failed while checking delivery notes.",
+            }
+            for order_id, submission in pending.items()
+        ]
+        write_summary(output_dir / "summary.csv", rows)
+        print("Libri login failed while checking delivery notes. Wrote sync summary.")
+        return 1
+
     pages = fetch_document_pages(opener, document_urls(env), output_dir, args.max_pages)
     delivery_notes = state.setdefault("delivery_notes", {})
     rows: list[dict[str, str]] = []

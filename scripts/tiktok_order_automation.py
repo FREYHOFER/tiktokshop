@@ -745,43 +745,57 @@ def run_once(args: argparse.Namespace) -> tuple[Path | None, dict[str, str], int
 
     # Auto-submit orders to Libri if requested
     if args.auto_submit_libri and run_dir is not None:
-        auto_submit_prepared_orders(run_dir, statuses, env_path)
+        auto_submit_prepared_orders(run_dir, statuses, env_path, Path(args.libri_state))
 
     return run_dir, statuses, len(orders)
 
 
-def auto_submit_prepared_orders(run_dir: Path, statuses: dict[str, str], env_path: Path) -> None:
+def auto_submit_prepared_orders(run_dir: Path, statuses: dict[str, str], env_path: Path, state_path: Path) -> None:
     """Automatically submit prepared orders to Libri."""
     submitted = 0
+    skipped = 0
     failed = 0
     for order_id, status in statuses.items():
-        if status.startswith("prepared"):
-            order_dir = run_dir / safe_filename(order_id)
-            if not order_dir.exists():
-                print(f"⚠ Order directory not found: {order_dir}")
-                failed += 1
-                continue
+        if status != "prepared":
+            print(f"Skipping Libri auto-submit for order {order_id or '<missing>'}: status is {status or '<empty>'}.")
+            skipped += 1
+            continue
 
-            print(f"Auto-submitting order {order_id} to Libri...")
-            script_path = Path(__file__).resolve().parent / "libri_customer_submit.py"
-            try:
-                result = subprocess.run(
-                    [sys.executable, str(script_path), "--order-dir", str(order_dir), "--env", str(env_path)],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                if result.returncode == 0:
-                    print(f"✓ Order {order_id} submitted successfully")
-                    submitted += 1
-                else:
-                    print(f"✗ Order {order_id} submission failed: {result.stderr}")
-                    failed += 1
-            except Exception as e:
-                print(f"✗ Error submitting order {order_id}: {e}")
-                failed += 1
+        order_dir = run_dir / safe_filename(order_id)
+        if not order_dir.exists():
+            print(f"Order directory not found: {order_dir}")
+            failed += 1
+            continue
 
-    print(f"Libri submissions: {submitted} success, {failed} failed")
+        print(f"Auto-submitting clean prepared order {order_id} to Libri...")
+        script_path = Path(__file__).resolve().parent / "libri_customer_submit.py"
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "--order-dir",
+                    str(order_dir),
+                    "--env",
+                    str(env_path),
+                    "--state",
+                    str(state_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode == 0:
+                print(f"Order {order_id} submitted successfully or skipped as a duplicate.")
+                submitted += 1
+            else:
+                print(f"Order {order_id} submission failed: {result.stderr}")
+                failed += 1
+        except Exception as e:
+            print(f"Error submitting order {order_id}: {e}")
+            failed += 1
+
+    print(f"Libri submissions: {submitted} submitted/skipped-as-duplicate, {skipped} skipped, {failed} failed")
 
 
 def seconds_until_run_at(run_at: str, timezone_name: str) -> float:
@@ -801,7 +815,7 @@ def watch(args: argparse.Namespace) -> int:
             print(f"Waiting until next {args.run_at} {args.timezone} run ({int(wait_seconds)} seconds).", flush=True)
             time.sleep(wait_seconds)
         run_dir, statuses, order_count = run_once(args)
-        prepared_count = sum(1 for status in statuses.values() if status.startswith("prepared"))
+        prepared_count = sum(1 for status in statuses.values() if status == "prepared")
         output_text = str(run_dir.resolve()) if run_dir else "no new output"
         print(f"{dt.datetime.now().isoformat(timespec='seconds')} - found {order_count}, prepared {prepared_count}: {output_text}", flush=True)
         if not args.run_at:
@@ -821,7 +835,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rebuild", action="store_true", help="Rebuild packages even if an order is already in state.")
     parser.add_argument("--ignore-state", action="store_true", help="Do not skip previously prepared orders.")
     parser.add_argument("--order-status", default="", help="Defaults to TIKTOK_ORDER_STATUS or AWAITING_SHIPMENT.")
-    parser.add_argument("--hours-back", type=int, default=72)
+    parser.add_argument("--hours-back", type=int, default=168)
     parser.add_argument("--page-size", type=int, default=50)
     parser.add_argument("--watch", action="store_true", help="Keep running. Use --run-at for daily mode or --poll-minutes.")
     parser.add_argument("--run-at", default="", help="Daily run time like 17:00. Only used with --watch.")
@@ -833,6 +847,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Submit prepared orders to Libri after file generation. This places real Libri orders.",
     )
+    parser.add_argument(
+        "--libri-state",
+        default=str(Path(".automation") / "libri_order_state.json"),
+        help="Persistent JSON state for submitted Libri orders when --auto-submit-libri is used.",
+    )
     return parser
 
 
@@ -841,7 +860,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.watch:
         return watch(args)
     run_dir, statuses, order_count = run_once(args)
-    prepared_count = sum(1 for status in statuses.values() if status.startswith("prepared"))
+    prepared_count = sum(1 for status in statuses.values() if status == "prepared")
     review_count = sum(1 for status in statuses.values() if "review" in status or "warning" in status)
     skipped_count = sum(1 for status in statuses.values() if status.startswith("skipped"))
     print(f"Orders found: {order_count}")
