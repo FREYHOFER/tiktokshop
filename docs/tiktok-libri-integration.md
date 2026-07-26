@@ -12,7 +12,7 @@ Steps:
 1. Refresh TikTok access token.
 2. Run the read-only TikTok/Libri integration audit.
 3. Fetch pending TikTok orders and prepare Libri order packages.
-4. Submit only clean prepared orders to Libri.
+4. Submit prepared orders to Libri when the Libri verification step passes.
 5. Check Libri delivery-note pages and, when a tracking number is found, send tracking back to TikTok Shop.
 6. Upload audit artifacts and persist local state in `.automation/order_state.json` and `.automation/libri_order_state.json`.
 
@@ -20,7 +20,7 @@ Steps:
 
 ` .automation/libri_order_state.json ` is the local source of truth for Libri submissions. Before a Libri order is submitted, `scripts/libri_customer_submit.py` checks whether the TikTok order ID is already recorded as `submitted`. If yes, it skips the order.
 
-Only clean packages with `automation_status=prepared` are auto-submitted. Packages with warnings stay manual-review only.
+Packages with `automation_status` starting with `prepared` are auto-submitted. If a package has warnings, the Libri submitter still validates EANs and customer fields before final submission; hard data problems fail the workflow and create an issue instead of silently leaving the order unplaced.
 
 ## Required secrets
 
@@ -55,6 +55,6 @@ TikTok tracking handback uses the official package ship endpoint by default. If 
 
 - `scripts/tiktok_order_automation.py`: reads TikTok orders and prepares Libri packages.
 - `scripts/libri_customer_submit.py`: submits a prepared package to Libri with duplicate-state protection.
-- `scripts/submit_clean_prepared_libri_orders.py`: submits only clean packages.
+- `scripts/submit_clean_prepared_libri_orders.py`: submits prepared packages after Libri-side validation.
 - `scripts/libri_lieferschein_sync.py`: checks Libri documents, extracts tracking, and updates TikTok fulfillment.
 - `scripts/tiktok_shop_integration_audit.py`: read-only audit for orders, products/listings, affiliate/sample readiness, Libri login, and Lieferschein pages.

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Submit only clean prepared TikTok order packages to Libri.
+"""Submit prepared TikTok order packages to Libri.
 
-This wrapper intentionally skips packages with warnings, such as incomplete customer
-addresses or missing EAN values. Duplicate protection is handled by
-scripts/libri_customer_submit.py through .automation/libri_order_state.json.
+The wrapper attempts every package whose status starts with "prepared". Hard
+data problems are still blocked by scripts/libri_customer_submit.py, and the
+workflow surfaces those failures instead of silently leaving an order unplaced.
+Duplicate protection is handled by scripts/libri_customer_submit.py through
+.automation/libri_order_state.json.
 """
 
 from __future__ import annotations
@@ -59,7 +61,7 @@ def submit_order(order_dir: Path, env_path: Path, state_path: Path) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Submit clean prepared TikTok order packages to Libri.")
+    parser = argparse.ArgumentParser(description="Submit prepared TikTok order packages to Libri.")
     parser.add_argument("--output-root", default="outputs/order_automation")
     parser.add_argument("--run-dir", default="", help="Specific prepared-order run directory. Defaults to newest run dir.")
     parser.add_argument("--env", default=".env")
@@ -85,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     for row in rows:
         order_id = clean(row.get("order_id"))
         status = clean(row.get("automation_status"))
-        if status != "prepared":
+        if not status.startswith("prepared"):
             print(f"Skipping order {order_id or '<missing>'}: status is {status or '<empty>'}.")
             skipped += 1
             continue
@@ -94,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Skipping order {order_id}: prepared order directory is missing.")
             skipped += 1
             continue
-        print(f"Submitting clean prepared order {order_id} to Libri.")
+        print(f"Submitting prepared order {order_id} to Libri with status {status}.")
         rc = submit_order(order_dir, Path(args.env), Path(args.state))
         if rc == 0:
             submitted += 1

@@ -188,7 +188,7 @@ Die Ergebnisse liegen in `outputs/order_automation/<timestamp>/<order-id>/`:
 - `tiktok_order.json`: lokaler Audit-Snapshot.
 - `orders_summary.csv`: Zusammenfassung des Laufs.
 
-Wichtig: Diese Version schickt bei Libri noch keine finale Bestellung ab. Sie bereitet die Kundenbestellung pro TikTok-Order getrennt vor, damit nicht versehentlich mehrere Kunden in einem Libri-Warenkorb landen. Fuer Vollautomatik muessen wir einmal den Libri-Schritt `Kundenbestellung > Direktversand zum Kunden` im Browser mitschneiden und die Formularfelder verifizieren.
+Wichtig: Die produktive Automation schickt vorbereitete TikTok-Orders direkt als verifizierte Libri-Kundenbestellung ab. Vor dem finalen Absenden prueft `scripts/libri_customer_submit.py`, dass die erwarteten EANs und Lieferadressfelder im Libri-Pruefschritt stehen. Wenn Libri die Bestellung nicht bestaetigt oder Daten fehlen, meldet der Workflow den Fehler statt die Order still liegen zu lassen.
 
 Probe fuer Libri Schritt 2, nur wenn der Libri-Warenkorb leer ist:
 
