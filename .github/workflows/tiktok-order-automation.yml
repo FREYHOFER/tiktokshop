@@ -266,6 +266,7 @@ jobs:
         if: steps.prepared-files.outputs.created == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          LIBRI_SUBMIT_OUTCOME: ${{ steps.libri-submit.outcome }}
         run: |
           python - <<'PY'
           import json
@@ -277,11 +278,18 @@ jobs:
           run_id = os.environ["GITHUB_RUN_ID"]
           run_url = f"{os.environ['GITHUB_SERVER_URL']}/{repo}/actions/runs/{run_id}"
           artifact_name = f"libri-order-packages-{run_id}"
+          libri_submit_outcome = os.environ.get("LIBRI_SUBMIT_OUTCOME", "")
+          if libri_submit_outcome == "failure":
+              title = f"TikTok order automation needs attention ({run_id})"
+              lead = "At least one prepared TikTok order could not be submitted to Libri."
+          else:
+              title = f"New TikTok order package processed ({run_id})"
+              lead = "New TikTok order package(s) were processed by the Libri automation."
 
           payload = {
-              "title": f"New TikTok order package prepared ({run_id})",
+              "title": title,
               "body": (
-                  f"@{owner} a new TikTok order package is ready.\n\n"
+                  f"@{owner} {lead}\n\n"
                   f"Download the artifact `{artifact_name}` from this workflow run:\n"
                   f"{run_url}\n\n"
                   "This issue intentionally contains no customer address or order details. "
@@ -304,6 +312,10 @@ jobs:
               issue = json.loads(response.read().decode("utf-8"))
           print(f"Created notification issue: {issue['html_url']}")
           PY
+
+      - name: Fail workflow if Libri submission failed
+        if: steps.libri-submit.outcome == 'failure'
+        run: exit 1
 
       - name: Save automation state
         if: always() && steps.required-secrets.outputs.available == 'true'
