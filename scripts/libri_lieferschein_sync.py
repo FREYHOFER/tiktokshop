@@ -280,33 +280,39 @@ def is_detail_page(url: str, body: str) -> bool:
     )
 
 
-def is_delivery_context(url: str, body: str) -> bool:
+def page_identity(url: str, body: str) -> str:
     decoded = html.unescape(body)
-    haystack = f"{url} {decoded}".casefold()
+    title_match = re.search(r"(?is)<title[^>]*>(.*?)</title>", decoded)
+    canonical_match = re.search(r'(?is)<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']', decoded)
+    title = title_match.group(1) if title_match else ""
+    canonical = canonical_match.group(1) if canonical_match else ""
+    return f"{url} {title} {canonical}".casefold()
+
+
+def is_delivery_context(url: str, body: str) -> bool:
+    identity = page_identity(url, body)
+    body_text = html.unescape(body).casefold()
     return any(
-        marker in haystack
+        marker in identity
         for marker in [
             "/lieferung/lieferscheine",
             "/lieferung/verlags-bs-sendungen",
             "/document/delivery-note",
-            "snippetmoduledeliverynotelistoverview",
-            "snippetmodulepackage",
         ]
-    )
+    ) or "snippetmoduledeliverynotelistoverview" in body_text or "snippetmodulepackage" in body_text
 
 
 def is_order_context(url: str, body: str) -> bool:
-    decoded = html.unescape(body)
-    haystack = f"{url} {decoded}".casefold()
+    identity = page_identity(url, body)
+    body_text = html.unescape(body).casefold()
     return any(
-        marker in haystack
+        marker in identity
         for marker in [
             "/auftrag/bestellungen",
             "/auftrag/auftraege/",
-            "snippetmoduleorderlistoverview",
             "mein.libri - auftrag - bestellungen",
         ]
-    )
+    ) or "snippetmoduleorderlistoverview" in body_text
 
 
 def page_mentions_delivery_note(url: str, body: str, order_id: str, submission: dict) -> bool:
@@ -608,8 +614,23 @@ def main(argv: list[str] | None = None) -> int:
                     "delivery_note_status": "not_found",
                     "last_checked_at": now_utc(),
                     "package_id": package_id,
+                    "tracking_status": "not_checked",
                 }
             )
+            for stale_key in [
+                "carrier",
+                "document_key",
+                "document_url_hash",
+                "found_at",
+                "fulfilled_at",
+                "last_tiktok_error",
+                "last_tiktok_attempt_at",
+                "tiktok_api_path",
+                "tiktok_status",
+                "tracking_issue_reported",
+                "tracking_number",
+            ]:
+                note.pop(stale_key, None)
             if order_match:
                 order_url, order_body = order_match
                 libri_order_number = extract_libri_order_number(order_url, order_body)
