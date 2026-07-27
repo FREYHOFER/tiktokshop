@@ -414,6 +414,10 @@ def create_issue(title: str, body: str) -> None:
     if not token or not repo:
         print("GitHub issue not created because GITHUB_TOKEN or GITHUB_REPOSITORY is missing.")
         return
+    owner = repo.split("/", 1)[0]
+    mention = f"@{owner} " if owner else ""
+    if mention and mention not in body:
+        body = mention + body
     request = urllib.request.Request(
         f"https://api.github.com/repos/{repo}/issues",
         data=json.dumps({"title": title, "body": body}).encode("utf-8"),
