@@ -90,6 +90,7 @@ jobs:
           LIBRI_USER: ${{ secrets.LIBRI_USERNAME }}
           LIBRI_PASS: ${{ secrets.LIBRI_PASSWORD }}
           LIBRI_DELIVERY_NOTE_URLS: ${{ secrets.LIBRI_DELIVERY_NOTE_URLS }}
+          LIBRI_DELIVERY_NOTE_GRACE_HOURS: ${{ secrets.LIBRI_DELIVERY_NOTE_GRACE_HOURS }}
           TIKTOK_APP_KEY: ${{ secrets.TIKTOK_APP_KEY }}
           TIKTOK_APP_SECRET: ${{ secrets.TIKTOK_APP_SECRET }}
           TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
@@ -113,10 +114,12 @@ jobs:
               "TIKTOK_SIGN_INCLUDE_BODY": "true",
               "TIKTOK_SHIPPING_PROVIDER_NAME": "DHL",
               "TIKTOK_SHIP_PACKAGE_PATH_TEMPLATE": "/fulfillment/{version}/packages/{package_id}/ship",
+              "LIBRI_DELIVERY_NOTE_GRACE_HOURS": "36",
           }
           secret_keys = [
               "LIBRI_CUSTOMER_NUMBER",
               "LIBRI_DELIVERY_NOTE_URLS",
+              "LIBRI_DELIVERY_NOTE_GRACE_HOURS",
               "TIKTOK_APP_KEY",
               "TIKTOK_APP_SECRET",
               "TIKTOK_ACCESS_TOKEN",
@@ -330,3 +333,7 @@ jobs:
           git commit -m "Update TikTok and Libri automation state"
           git pull --rebase
           git push
+
+      - name: Fail workflow if Lieferschein sync failed
+        if: steps.lieferschein-sync.outcome == 'failure'
+        run: exit 1
