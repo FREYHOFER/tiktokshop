@@ -13,7 +13,7 @@ Steps:
 2. Run the read-only TikTok/Libri integration audit.
 3. Fetch pending TikTok orders and prepare Libri order packages.
 4. Submit prepared orders to Libri when the Libri verification step passes.
-5. Check Libri delivery-note pages and, when a tracking number is found, send tracking back to TikTok Shop.
+5. Check Libri order-history and delivery-note pages, confirm that submitted orders appear in Libri, and, when a tracking number is found, send tracking back to TikTok Shop.
 6. Upload audit artifacts and persist local state in `.automation/order_state.json` and `.automation/libri_order_state.json`.
 
 ## Duplicate protection
@@ -41,13 +41,14 @@ Recommended for stable operation:
 - `TIKTOK_SHIPPING_PROVIDER_ID` — optional, but more reliable if TikTok requires the carrier ID
 - `TIKTOK_SHIP_PACKAGE_PATH_TEMPLATE` — default in workflow: `/fulfillment/{version}/packages/{package_id}/ship`
 - `LIBRI_DELIVERY_NOTE_URLS` — exact comma- or newline-separated Mein.Libri URLs where German Lieferscheine/Belege appear after login
+- `LIBRI_DELIVERY_NOTE_GRACE_HOURS` — optional grace period before a submitted Libri order with no matching Lieferschein becomes a workflow failure; default: `36`
 - `TIKTOK_AFFILIATE_AUDIT_PATHS` — optional comma- or newline-separated affiliate/sample probe endpoints if the app has Affiliate API scopes
 
 ## What is still not fully automatic
 
 Affiliate/sample checks depend on TikTok Affiliate API access and scopes. The daily audit probes likely endpoints, but it cannot approve samples or read the Affiliate Center unless the app is allowed to access those APIs.
 
-Libri Lieferschein detection depends on finding the correct Mein.Libri document page. If the default guessed pages do not work, set `LIBRI_DELIVERY_NOTE_URLS` to the exact pages from the browser after login.
+Libri Lieferschein detection checks the Mein.Libri order-history page, the Lieferscheine/Gutschriftanzeigen page, and shipment pages. If the defaults do not cover the account view, set `LIBRI_DELIVERY_NOTE_URLS` to the exact pages from the browser after login. A submitted order that has no matching Lieferschein after the grace period fails the workflow and creates an issue instead of staying silent.
 
 TikTok tracking handback uses the official package ship endpoint by default. If the account requires a different endpoint or payload, set `TIKTOK_SHIP_PACKAGE_PATH_TEMPLATE` and `TIKTOK_SHIPPING_PROVIDER_ID`.
 
