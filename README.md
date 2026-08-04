@@ -1,124 +1,66 @@
-# TikTok-Shop Buchupload über Libri-Listen
+# TikTok Shop × Libri Automation
 
-Diese Arbeitsmappe enthält eine lokale Pipeline, die aus gespeicherten Libri-Daten eine TikTok-Shop-Bulk-Upload-Datei für `Literatur und Kunst/Roman` erzeugt.
+Eine Python-Pipeline für den Buchhandel, die Libri-Daten für TikTok Shop aufbereitet, Bestände abgleicht und neue Bestellungen für die weitere Verarbeitung vorbereitet.
 
-## Schnellstart
+## Ziel
 
-```powershell
-& "C:\Users\User\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" scripts\tiktok_libri_pipeline.py --workspace .
-```
+Das Projekt verbindet wiederkehrende Abläufe zwischen Libri und TikTok Shop. Daten werden nicht ungeprüft veröffentlicht: unvollständige oder riskante Einträge landen in separaten Prüf- und Fehlerlisten.
 
-Die Ergebnisse landen unter `outputs/<timestamp>/`:
+## Module
 
-- `tiktok_upload_green.xlsx`: TikTok-Bulk-Upload-Datei mit nur freigegebenen Kandidaten.
-- `candidate_report.csv`: Gesamtprüfung aller gefundenen Kandidaten.
-- `review_hold.csv`: Titel, die vor Veröffentlichung manuell geprüft werden sollen.
-- `rejects.csv`: Titel mit fehlenden Pflichtdaten, falschem Format oder nicht uploadfähigem Status.
-- `upload_log.md`: kurze Upload-Zusammenfassung.
+### 1. Produktimport
 
-## Datenquellen
+Aus gespeicherten Libri-Produktseiten, Bestseller-Daten oder einer manuellen CSV entstehen:
 
-Die Pipeline liest aktuell:
+- `tiktok_upload_green.xlsx` mit freigegebenen Produkten
+- `candidate_report.csv` als Gesamtprüfung
+- `review_hold.csv` für manuelle Kontrolle
+- `rejects.csv` für unvollständige oder ungeeignete Datensätze
+- `upload_log.md` als Zusammenfassung
 
-- gespeicherte Mein.Libri-Produktdetailseiten als HTML, standardmäßig `*.html`
-- den vorhandenen Libri-Bestseller-PDF-Export
-- optional eine manuelle CSV per `--manual-csv <datei.csv>`
+Die Seller-SKU folgt dem Muster `LIBRI-{EAN}`. Das originale TikTok-Template wird kopiert und nicht strukturell verändert.
 
-## Libri-Login und Bilder
+### 2. Bestandsabgleich
 
-Bitte keine Zugangsdaten in den Chat schreiben. Wenn ein Login gebraucht wird, kopiere `.env.example` nach `.env` und trage die Werte nur lokal ein.
-
-Für das automatische Speichern von Libri-Produktdetailseiten werden benötigt:
-
-- `LIBRI_CUSTOMER_NUMBER`
-- `LIBRI_USERNAME`
-- `LIBRI_PASSWORD`
-
-Die Pipeline prüft Libri-Bildlinks zuerst anonym. Nur anonym erreichbare Bild-URLs können direkt in die TikTok-XLSX, weil TikTok beim Import keine Libri-Session-Cookies mitschicken kann.
-
-Optional kann `LIBRI_COOKIE` in `.env` gesetzt werden. Das dient nur zur Diagnose: Wenn ein Bild mit Cookie erreichbar ist, aber anonym nicht, landet der Titel nicht im Green-Upload. Dann brauchen wir als Fallback TikTok-Mediencenter-Upload oder ein anderes öffentliches Bildhosting mit den erlaubten Libri-Bildern.
-
-Produktdetailseiten nach ISBN/EAN aus einer CSV laden:
-
-```powershell
-& "C:\Users\User\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" scripts\fetch_libri_product_pages.py `
-  --isbn-csv inputs\first5_bestseller_manual.csv `
-  --output-dir libri_product_pages `
-  --limit 5
-```
-
-Danach die Upload-Datei mit den geladenen Libri-Seiten neu erzeugen:
-
-```powershell
-& "C:\Users\User\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" scripts\tiktok_libri_pipeline.py `
-  --workspace . `
-  --detail-glob "libri_product_pages\*.html" `
-  --bestseller-pdf none.pdf `
-  --output-dir outputs\first5_from_libri
-```
-
-Für viele Titel am besten weitere Libri-Produktdetailseiten als HTML in einen Unterordner legen und so starten:
-
-```powershell
-& "C:\Users\User\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" scripts\tiktok_libri_pipeline.py `
-  --workspace . `
-  --detail-glob "libri_product_pages\*.html" `
-  --limit 100
-```
-
-## Manuelle CSV
-
-Eine CSV kann diese Spalten enthalten:
-
-```csv
-title,author,subtitle,publisher,language,binding,release_date,pages,weight_g,stock,price,ean,product_group,blurb,author_bio,images
-```
-
-Mehrere Bild-URLs in `images` werden mit `|` getrennt.
-
-## Upload-Regeln
-
-- Das originale TikTok-Template wird nicht verändert; die Pipeline kopiert es in den Output.
-- Daten werden ab Zeile 7 geschrieben, ohne Spalten oder Pflichtzeilen zu verändern.
-- Als SKU wird `LIBRI-{EAN}` verwendet.
-- Verbotene Template-Spalten wie `JAHR`, `Herausgeber`, `ISBN/ISSN`, `Übersetzer`, `Editor` und `Anzahl der Seiten` bleiben leer; diese Angaben stehen stattdessen in der Beschreibung.
-- Risikotitel mit 18+, explizitem oder stark sexualisiertem Wording, Selbstverletzungs-/Suizidbezug oder fraglichen Bildern landen in `review_hold.csv` und nicht in der Upload-Datei.
-
-## Seller-Center-Schritt
-
-Die erzeugte Datei wird anschließend im Seller Center über `Products > Bulk listing` hochgeladen. Nach dem TikTok-Pre-Check nur veröffentlichen, wenn keine Fehler angezeigt werden; Fehlerberichte wieder in die Pipeline bzw. manuelle Datenkorrektur zurückführen.
-
-## Täglicher Mengenabgleich Libri -> TikTok
-
-`scripts/update_tiktok_quantities_from_libri.py` aktualisiert TikTok-Shop-Bestände aus dem aktuellen Libri-`Bestand`. Das Script sucht TikTok-Produkte mit Seller-SKU `LIBRI-{EAN}`, lädt die passende Mein.Libri-Produktdetailseite neu, liest den Bestand aus und setzt die TikTok-SKU-Menge über die TikTok Shop Open API.
-
-Vorher in `.env` setzen:
-
-- Libri: `LIBRI_CUSTOMER_NUMBER`, `LIBRI_USERNAME`, `LIBRI_PASSWORD`
-- TikTok: `TIKTOK_APP_KEY`, `TIKTOK_APP_SECRET`, `TIKTOK_ACCESS_TOKEN`
-- Optional: `TIKTOK_SHOP_CIPHER`, `TIKTOK_WAREHOUSE_ID`
-
-Sicherer Test ohne TikTok-Schreibzugriff:
+Das Inventory-Script liest den aktuellen Libri-Bestand und aktualisiert die zugehörige TikTok-SKU. Ein Dry-Run zeigt geplante Änderungen ohne Schreibzugriff.
 
 ```powershell
 .\scripts\run_inventory_update_once.ps1 -DryRun -Limit 5
 ```
 
-Einmaliger Live-Lauf:
+Der Abgleich kann lokal oder täglich über GitHub Actions ausgeführt werden. Pro Lauf entsteht ein nachvollziehbares CSV-Protokoll.
+
+### 3. Bestellvorbereitung
+
+Neue TikTok-Bestellungen werden aus der API oder testweise aus einem Seller-Center-CSV-Export gelesen. Für jede Bestellung entstehen unter anderem:
+
+- eine Libri-Importdatei
+- eine Lieferadressdatei
+- ein lokaler Audit-Snapshot
+- eine Zusammenfassung des Laufs
+
+Der Workflow verarbeitet nur neue, noch nicht bekannte Bestellungen und speichert keine Kundendaten in öffentlichen GitHub-Issues.
+
+## Schnellstart Produktimport
 
 ```powershell
-.\scripts\run_inventory_update_once.ps1
+python scripts\tiktok_libri_pipeline.py --workspace .
 ```
 
-Täglichen Windows-Task installieren, standardmäßig um 06:00 Uhr lokaler Windows-Zeit:
+Weitere Produktseiten können über einen eigenen Ordner eingelesen werden:
 
 ```powershell
-.\scripts\install_inventory_update_task.ps1 -RunAt 06:00
+python scripts\tiktok_libri_pipeline.py `
+  --workspace . `
+  --detail-glob "libri_product_pages\*.html" `
+  --limit 100
 ```
 
-Laptop-unabhaengiger Live-Lauf ueber GitHub Actions: `.github/workflows/tiktok-inventory-update.yml` laeuft taeglich um `04:00 UTC` und kann manuell ueber den Actions-Tab gestartet werden. Bei manuellem Start koennen `dry_run` und `limit` gesetzt werden; der Zeitplan laeuft live und schreibt TikTok-Bestaende.
+## Konfiguration
 
-Dafuer muessen in GitHub unter `Settings > Secrets and variables > Actions` diese Repository-Secrets gesetzt sein:
+Zugangsdaten gehören ausschließlich in eine lokale `.env`-Datei oder in GitHub Actions Secrets. Sie dürfen nicht committed werden.
+
+Je nach verwendetem Modul werden unter anderem benötigt:
 
 - `LIBRI_CUSTOMER_NUMBER`
 - `LIBRI_USERNAME`
@@ -126,76 +68,16 @@ Dafuer muessen in GitHub unter `Settings > Secrets and variables > Actions` dies
 - `TIKTOK_APP_KEY`
 - `TIKTOK_APP_SECRET`
 - `TIKTOK_ACCESS_TOKEN`
-- `TIKTOK_SHOP_CIPHER` falls TikTok mehrere Shops fuer den Token zurueckgibt
-- `TIKTOK_WAREHOUSE_ID` falls der Projektstandard nicht passt
+- optional `TIKTOK_SHOP_CIPHER`
+- optional `TIKTOK_WAREHOUSE_ID`
 
-Die Protokolle liegen in `outputs/inventory_updates/<timestamp>/inventory_update_log.csv`; bei GitHub Actions wird dieser Ordner als Artifact `tiktok-inventory-update-<run-id>` hochgeladen. Dort steht pro SKU, welche Libri-Menge gelesen wurde, welche TikTok-Menge vorher bekannt war und ob aktualisiert, übersprungen oder ein Fehler gemeldet wurde.
+## Sicherheits- und Prüfregeln
 
-## Bestellautomation TikTok -> Libri
+- Keine Zugangsdaten im Repository
+- Dry-Run für Bestandsänderungen
+- Manuelle Prüfliste für sensible oder unvollständige Produkte
+- Keine automatische Veröffentlichung bei Validierungsfehlern
+- Protokolle und Artefakte für jeden Automationslauf
+- Zustandsdatei gegen doppelte Bestellverarbeitung
 
-Neue TikTok-Bestellungen werden mit `scripts/tiktok_order_automation.py` vorbereitet. Das Script liest entweder die TikTok Shop Open API oder testweise den neuesten Seller-Center-CSV-Export `Versandbereit Bestellung*.csv` aus Downloads.
-
-Sicherer Test ohne API:
-
-```powershell
-.\scripts\prepare_order_from_latest_tiktok_csv.ps1
-```
-
-API-Einmalabruf:
-
-```powershell
-.\scripts\run_order_automation_once.ps1
-```
-
-Dauerlauf, der jeden Tag um 17:00 Uhr Berliner Zeit abruft:
-
-```powershell
-.\scripts\watch_order_automation_17uhr.ps1
-```
-
-Optional kann ein Windows-Task angelegt werden:
-
-```powershell
-.\scripts\install_order_automation_task.ps1
-```
-
-Dauerlauf fuer neue Bestellungen: prueft regelmaessig TikTok und bereitet nur neue, noch nicht verarbeitete Orders vor. Wenn nichts Neues da ist, wird kein leerer Output-Ordner erzeugt.
-
-```powershell
-.\scripts\watch_order_automation_new_orders.ps1 -PollMinutes 5
-```
-
-Optional als Windows-Task beim Login starten:
-
-```powershell
-.\scripts\install_order_automation_new_orders_task.ps1 -PollMinutes 5
-```
-
-Laptop-unabhaengiger Lauf ueber GitHub Actions: `.github/workflows/tiktok-order-automation.yml` prueft alle 15 Minuten und kann auch manuell ueber den Actions-Tab gestartet werden. Dafuer muessen in GitHub unter `Settings > Secrets and variables > Actions` diese Repository-Secrets gesetzt sein:
-
-- `LIBRI_CUSTOMER_NUMBER`
-- `TIKTOK_APP_KEY`
-- `TIKTOK_APP_SECRET`
-- `TIKTOK_ACCESS_TOKEN`
-- `TIKTOK_SHOP_CIPHER` falls TikTok mehrere Shops fuer den Token zurueckgibt
-
-Wenn neue Bestellungen vorbereitet werden, liegen die Dateien als Actions-Artifact `libri-order-packages-<run-id>` im jeweiligen Workflow-Lauf. Zusaetzlich erstellt der Workflow ein GitHub-Issue mit Link zum Workflow-Lauf, aber ohne Kundendaten im Issue-Text. Der Workflow commitet nur `.automation/order_state.json`, damit dieselbe Bestellung nicht bei jedem Poll erneut vorbereitet wird.
-
-Die Ergebnisse liegen in `outputs/order_automation/<timestamp>/<order-id>/`:
-
-- `libri_kundenbestellung_import.xlsx`: Libri-Import fuer die Artikel dieser einen TikTok-Bestellung.
-- `kundenadresse.csv`: Lieferadresse fuer Libri Schritt 2 `Kundenbestellung > Direktversand zum Kunden`.
-- `tiktok_order.json`: lokaler Audit-Snapshot.
-- `orders_summary.csv`: Zusammenfassung des Laufs.
-
-Wichtig: Die produktive Automation schickt vorbereitete TikTok-Orders direkt als verifizierte Libri-Kundenbestellung ab. Vor dem finalen Absenden prueft `scripts/libri_customer_submit.py`, dass die erwarteten EANs und Lieferadressfelder im Libri-Pruefschritt stehen. Wenn Libri die Bestellung nicht bestaetigt oder Daten fehlen, meldet der Workflow den Fehler statt die Order still liegen zu lassen.
-
-Probe fuer Libri Schritt 2, nur wenn der Libri-Warenkorb leer ist:
-
-```powershell
-& "C:\Users\User\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" `
-  scripts\libri_customer_checkout_probe.py `
-  --order-dir "outputs\order_automation\<timestamp>\<order-id>"
-```
-
-Der Probe-Helfer legt Artikel in den Libri-Warenkorb, geht bis `Kundenbestellung`, speichert `libri_customer_step2.html` und stoppt vor dem finalen Absenden.
+Die produktiven Abläufe sollten erst nach einem erfolgreichen Test mit wenigen Datensätzen aktiviert werden.
