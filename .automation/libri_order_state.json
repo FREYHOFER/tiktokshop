@@ -3,7 +3,7 @@
     "576920602882775881": {
       "delivery_note_missing_issue_reported": "2026-07-27T00:08:08+00:00",
       "delivery_note_status": "missing_overdue",
-      "last_checked_at": "2026-07-27T09:51:24+00:00",
+      "last_checked_at": "2026-08-29T14:41:51+00:00",
       "package_id": "1154212325749267273",
       "tracking_status": "not_checked"
     }
@@ -13,10 +13,10 @@
       "eans": [
         "9783492075312"
       ],
-      "libri_order_checked_at": "2026-07-27T09:51:24+00:00",
+      "libri_order_checked_at": "2026-08-29T14:41:51+00:00",
       "libri_order_number": "659241702",
       "libri_order_page_hash": "36a14327e45d6f2e",
-      "libri_order_status": "found",
+      "libri_order_status": "not_found",
       "package_id": "1154212325749267273",
       "source": "github_actions",
       "status": "submitted",
