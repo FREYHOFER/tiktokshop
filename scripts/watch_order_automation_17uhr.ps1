@@ -13,7 +13,10 @@ if (-not $Python) {
     --state "$Workspace\outputs\order_automation\state.json" `
     --watch `
     --run-at 17:00 `
-    --timezone Europe/Berlin
+    --timezone Europe/Berlin `
+    --hours-back 0 `
+    --auto-submit-libri `
+    --allow-existing-libri-basket
   exit $LASTEXITCODE
 }
 
@@ -23,4 +26,7 @@ if (-not $Python) {
   --state "$Workspace\outputs\order_automation\state.json" `
   --watch `
   --run-at 17:00 `
-  --timezone Europe/Berlin
+  --timezone Europe/Berlin `
+  --hours-back 0 `
+  --auto-submit-libri `
+  --allow-existing-libri-basket

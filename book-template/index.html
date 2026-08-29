@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lights Out - Interaktives 3D-Modell</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles.css?v=3">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <main class="workspace">
+    <section class="stage" aria-label="3D Buchvorschau">
+      <canvas id="book-canvas"></canvas>
+
+      <header class="stage-header">
+        <div>
+          <span class="eyebrow">PRODUKTMODELL</span>
+          <h1>Lights Out</h1>
+        </div>
+        <div class="stage-actions">
+          <button id="reset-view" class="icon-button" type="button" title="Ansicht zurücksetzen" aria-label="Ansicht zurücksetzen">&#8634;</button>
+          <button id="export-image" class="command-button" type="button">PNG exportieren</button>
+        </div>
+      </header>
+
+      <div class="view-switcher" role="group" aria-label="Kameraansicht">
+        <button type="button" data-view="front">Front</button>
+        <button type="button" data-view="perspective" class="active">3/4</button>
+        <button type="button" data-view="spine">Rücken</button>
+        <button type="button" data-view="top">Oben</button>
+      </div>
+
+      <div class="stage-status" aria-live="polite">
+        <span id="dimension-readout">136 x 214 x 45 mm</span>
+        <span id="page-readout">592 Seiten</span>
+      </div>
+    </section>
+
+    <aside class="controls" aria-label="Buchparameter">
+      <div class="controls-heading">
+        <span class="eyebrow">NAVESSA ALLEN</span>
+        <h2>Lights Out</h2>
+      </div>
+
+      <section class="control-group">
+        <h3>Format</h3>
+        <label for="trim-preset">Voreinstellung</label>
+        <select id="trim-preset">
+          <option value="136,214,45,592">Lights Out Original</option>
+          <option value="145,215,28,320">Taschenbuch 145 x 215</option>
+          <option value="125,190,24,280">Kompakt 125 x 190</option>
+          <option value="135,210,30,360">Roman 135 x 210</option>
+        </select>
+
+        <div class="range-row">
+          <label for="book-width">Breite <output id="book-width-output">136 mm</output></label>
+          <input id="book-width" type="range" min="105" max="210" value="136" step="1">
+        </div>
+        <div class="range-row">
+          <label for="book-height">Höhe <output id="book-height-output">214 mm</output></label>
+          <input id="book-height" type="range" min="148" max="297" value="214" step="1">
+        </div>
+        <div class="range-row">
+          <label for="book-depth">Dicke <output id="book-depth-output">45 mm</output></label>
+          <input id="book-depth" type="range" min="10" max="70" value="45" step="1">
+        </div>
+        <div class="range-row">
+          <label for="page-count">Seiten <output id="page-count-output">592</output></label>
+          <input id="page-count" type="range" min="64" max="800" value="592" step="8">
+        </div>
+      </section>
+
+      <section class="control-group">
+        <h3>Material</h3>
+        <label>Einband</label>
+        <div class="swatches" id="cover-swatches" role="group" aria-label="Einbandfarbe">
+          <button type="button" class="swatch active" data-color="#39404a" style="--swatch:#39404a" aria-label="Graphit"></button>
+          <button type="button" class="swatch" data-color="#c63b32" style="--swatch:#c63b32" aria-label="Rot"></button>
+          <button type="button" class="swatch" data-color="#23695b" style="--swatch:#23695b" aria-label="Gruen"></button>
+          <button type="button" class="swatch" data-color="#2d568f" style="--swatch:#2d568f" aria-label="Blau"></button>
+          <button type="button" class="swatch" data-color="#ebe6dc" style="--swatch:#ebe6dc" aria-label="Elfenbein"></button>
+        </div>
+
+        <label for="cover-color">Eigene Farbe</label>
+        <input id="cover-color" type="color" value="#080b0e">
+
+        <label for="paper-color">Papier</label>
+        <input id="paper-color" type="color" value="#eee9df">
+
+        <div class="range-row">
+          <label for="roughness">Matt / Glanz <output id="roughness-output">Seidenmatt</output></label>
+          <input id="roughness" type="range" min="0.15" max="1" value="0.48" step="0.01">
+        </div>
+      </section>
+
+      <section class="control-group">
+        <h3>Licht</h3>
+        <div class="segmented" role="group" aria-label="Lichtstimmung">
+          <button type="button" data-light="studio" class="active">Studio</button>
+          <button type="button" data-light="soft">Weich</button>
+          <button type="button" data-light="dramatic">Hart</button>
+        </div>
+        <div class="range-row">
+          <label for="light-strength">Staerke <output id="light-strength-output">100%</output></label>
+          <input id="light-strength" type="range" min="0.35" max="1.8" value="1" step="0.05">
+        </div>
+      </section>
+
+      <section class="control-group cover-upload">
+        <h3>Cover-Test</h3>
+        <label class="file-button" for="cover-upload">Bild wählen</label>
+        <input id="cover-upload" type="file" accept="image/png,image/jpeg,image/webp">
+        <button id="clear-cover" class="text-button" type="button" disabled>Original wiederherstellen</button>
+      </section>
+    </aside>
+  </main>
+
+  <script type="module" src="./app.js?v=3"></script>
+</body>
+</html>

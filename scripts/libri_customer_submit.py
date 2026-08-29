@@ -308,23 +308,70 @@ def add_eans_to_basket(opener, eans: list[str], output_dir: Path) -> str:
     return response_html
 
 
-def parse_basket_items(page_html: str) -> dict[str, str]:
-    """Extract item ID -> quantity mapping from basket HTML."""
+def ensure_eans_in_basket(opener, page_html: str, eans: list[str], output_dir: Path) -> str:
+    requested = Counter(eans)
+    current = {item["ean"]: int(item["quantity"] or "1") for item in parse_basket_items(page_html)}
+    present = {ean: current[ean] for ean in requested if ean in current}
+    wrong_quantity = {ean: (present[ean], requested[ean]) for ean in present if present[ean] != requested[ean]}
+    if wrong_quantity:
+        detail = ", ".join(f"{ean}: basket {actual}, order {expected}" for ean, (actual, expected) in wrong_quantity.items())
+        raise SystemExit("Target EAN already exists in Libri basket with a different quantity: " + detail)
+    if len(present) == len(requested):
+        return page_html
+    missing: list[str] = []
+    for ean, quantity in requested.items():
+        if ean not in present:
+            missing.extend([ean] * quantity)
+    return add_eans_to_basket(opener, missing, output_dir)
+
+
+def parse_basket_items(page_html: str) -> list[dict[str, str]]:
+    """Extract basket row IDs, EANs, and quantities."""
     decoded = html.unescape(page_html)
-    items: dict[str, str] = {}
-    pattern = re.compile(r'name="item\[([^\]]+)\]\[quantity\]"[^>]*value="([^"]*)"', re.IGNORECASE)
-    for item_id, quantity in pattern.findall(decoded):
-        items[item_id] = quantity or "1"
+    items: list[dict[str, str]] = []
+    for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>", decoded, re.IGNORECASE | re.DOTALL):
+        ean_match = re.search(r'class="column-article_number"[^>]*>\s*(\d{13})\s*<', row, re.IGNORECASE)
+        quantity_match = re.search(
+            r'name="item\[([^\]]+)\]\[quantity\]"[^>]*value="([^"]*)"',
+            row,
+            re.IGNORECASE,
+        )
+        if ean_match and quantity_match:
+            items.append(
+                {
+                    "item_id": quantity_match.group(1),
+                    "ean": ean_match.group(1),
+                    "quantity": quantity_match.group(2) or "1",
+                }
+            )
     return items
 
 
+def select_order_items(page_html: str, eans: list[str]) -> dict[str, str]:
+    requested = Counter(eans)
+    selected: dict[str, str] = {}
+    found: set[str] = set()
+    for item in parse_basket_items(page_html):
+        ean = item["ean"]
+        if ean in requested:
+            selected[item["item_id"]] = str(requested[ean])
+            found.add(ean)
+    missing = sorted(set(requested) - found)
+    if missing:
+        raise SystemExit("Expected EANs not found in Libri basket after adding: " + ", ".join(missing))
+    return selected
+
+
 def post_customer_checkout_step(
-    opener, basket_html: str, reference: str, output_dir: Path
-) -> tuple[str, dict[str, str], str]:
-    """Post checkout and reach customer data step. Return (response_html, item_quantities, step_url)."""
+    opener, basket_html: str, eans: list[str], reference: str, output_dir: Path
+) -> tuple[str, str, dict[str, str]]:
+    """Post checkout and reach customer data step.
+
+    Returns the step URL, its HTML, and the selected item quantities.
+    """
     decoded = html.unescape(basket_html)
     token = csrf_token(decoded)
-    item_quantities = parse_basket_items(decoded)
+    item_quantities = select_order_items(decoded, eans)
     if not item_quantities:
         raise SystemExit("No basket item quantity fields found after adding EANs.")
 
@@ -333,15 +380,17 @@ def post_customer_checkout_step(
         "checkout": "1",
         "cmsauthenticitytoken": token,
     }
-    for item_id, quantity in item_quantities.items():
-        payload[f"item[{item_id}][quantity]"] = quantity
+    for item in parse_basket_items(decoded):
+        item_id = item["item_id"]
+        payload[f"item[{item_id}][quantity]"] = item["quantity"]
+    for item_id in item_quantities:
         payload[f"item[{item_id}][order]"] = "1"
         payload[f"data[confirm][orderReference][positionReference][{item_id}]"] = reference
 
-    step_url, response_html = fetch(opener, ORDER_PAGE_URL, payload)
+    step2_url, response_html = fetch(opener, ORDER_PAGE_URL, payload)
     (output_dir / "libri_customer_step2.html").write_text(response_html, encoding="utf-8")
-    (output_dir / "libri_customer_step2_url.txt").write_text(step_url + "\n", encoding="utf-8")
-    return response_html, item_quantities, step_url
+    (output_dir / "libri_customer_step2_url.txt").write_text(step2_url + "\n", encoding="utf-8")
+    return step2_url, response_html, item_quantities
 
 
 def page_has_success_text(page_html: str) -> bool:
@@ -359,7 +408,7 @@ def page_has_success_text(page_html: str) -> bool:
 def validate_confirmation_page(page_html: str, eans: list[str], customer_data: dict[str, str]) -> None:
     decoded = html.unescape(page_html)
     text = normalized_text(decoded)
-    if not Counter(basket_article_numbers(decoded)) == Counter(eans):
+    if Counter(basket_article_numbers(decoded)) != Counter(eans):
         raise SystemExit("Confirmation page does not show exactly the expected EAN(s).")
 
     required_customer_values = {
@@ -402,31 +451,30 @@ def choose_final_confirmation_payload(page_html: str) -> dict[str, str]:
     return candidates[0]
 
 
-def submit_final_confirmation(opener, confirm_url: str, confirm_html: str, output_dir: Path) -> bool:
-    payload = choose_final_confirmation_payload(confirm_html)
-    print("Submitting final Libri confirmation.")
-    _, response_html = fetch(opener, confirm_url, payload)
-    (output_dir / "libri_submit_response.html").write_text(response_html, encoding="utf-8")
-    if page_has_success_text(response_html):
-        print("✓ Order successfully submitted to Libri!")
-        return True
-    print("⚠ Final response received but success was not confirmed. Check libri_submit_response.html")
-    return False
+def country_value(country: str) -> str:
+    normalized = clean(country).casefold()
+    values = {
+        "de": "1",
+        "deutschland": "1",
+        "germany": "1",
+        "at": "26",
+        "österreich": "26",
+        "austria": "26",
+        "ch": "2",
+        "schweiz": "2",
+        "switzerland": "2",
+    }
+    if normalized not in values:
+        raise SystemExit(f"Unsupported Libri destination country: {country}")
+    return values[normalized]
 
 
-def fill_customer_data_and_submit(
-    opener,
-    step2_html: str,
-    step2_url: str,
-    customer_data: dict[str, str],
-    item_quantities: dict[str, str],
-    eans: list[str],
-    output_dir: Path,
-) -> bool:
-    """Fill customer data, validate confirmation page, then submit final order."""
+def post_customer_data(
+    opener, step2_url: str, step2_html: str, customer_data: dict[str, str], output_dir: Path
+) -> tuple[str, str]:
+    """Fill the verified Libri direct-shipping fields and open the review step."""
     decoded = html.unescape(step2_html)
     token = csrf_token(decoded)
-
     payload: dict[str, str] = {
         "cmsauthenticitytoken": token,
         "module_fnc[secondary]": "processStep",
@@ -436,27 +484,83 @@ def fill_customer_data_and_submit(
         "data[customer-drop][address]": customer_data["strasse"],
         "data[customer-drop][zip]": customer_data["plz"],
         "data[customer-drop][city]": customer_data["ort"],
-        "data[customer-drop][country]": "1",
+        "data[customer-drop][country]": country_value(customer_data["country"]),
         "data[customer-drop][parcelDelivery]": "1",
     }
-
     print("Submitting Libri customer data.")
+    review_url, review_html = fetch(opener, step2_url, payload)
+    (output_dir / "libri_review_step3.html").write_text(review_html, encoding="utf-8")
+    (output_dir / "libri_confirm_order.html").write_text(review_html, encoding="utf-8")
+    (output_dir / "libri_confirm_order_url.txt").write_text(review_url + "\n", encoding="utf-8")
+    return review_url, review_html
 
+def visible_text(page_html: str) -> str:
+    decoded = html.unescape(page_html)
+    decoded = re.sub(r"(?is)<script.*?</script>|<style.*?</style>", " ", decoded)
+    decoded = re.sub(r"(?s)<[^>]+>", " ", decoded)
+    return re.sub(r"\s+", " ", decoded).strip()
+
+
+def verify_review(
+    review_html: str, eans: list[str], customer_data: dict[str, str], order_dir: Path
+) -> str:
+    validate_confirmation_page(review_html, eans, customer_data)
+    text = visible_text(review_html)
+    required = [customer_data["name"], customer_data["strasse"], customer_data["plz"], customer_data["ort"]]
+    missing = [value for value in required if value and value.casefold() not in text.casefold()]
+    if "Kundenbestellung überprüfen" not in text:
+        missing.append("Libri review step")
+    order = json.loads((order_dir / "tiktok_order.json").read_text(encoding="utf-8"))
+    titles = [clean(line.get("product_name")) for line in order.get("lines", []) if clean(line.get("ean")) in set(eans)]
+    title_stems = [title.split(" - ", 1)[0] for title in titles]
+    missing.extend(title for title in title_stems if title and title.casefold() not in text.casefold())
+    expected_eans = set(eans)
+    reviewed_eans = set(re.findall(r"(?<!\d)97[89]\d{10}(?!\d)", text))
+    if reviewed_eans != expected_eans:
+        missing.append(
+            "reviewed EANs " + ",".join(sorted(reviewed_eans)) + " (expected " + ",".join(sorted(expected_eans)) + ")"
+        )
+    if missing:
+        raise SystemExit("Libri review could not be verified; missing: " + ", ".join(missing))
+    return text
+
+
+def final_form_payload(review_html: str) -> dict[str, str]:
+    decoded = html.unescape(review_html)
+    form_match = re.search(r'(?is)<form\b[^>]*id="checkoutForm"[^>]*>(.*?)</form>', decoded)
+    if not form_match:
+        raise SystemExit("Could not find Libri checkout confirmation form.")
+    form = form_match.group(1)
+    payload: dict[str, str] = {}
+    for tag in re.findall(r"(?is)<input\b[^>]*>", form):
+        name_match = re.search(r'\bname="([^"]+)"', tag, re.IGNORECASE)
+        if not name_match:
+            continue
+        input_type = (re.search(r'\btype="([^"]+)"', tag, re.IGNORECASE) or [None, "text"])[1].casefold()
+        if input_type in {"checkbox", "radio"} and not re.search(r"\bchecked\b", tag, re.IGNORECASE):
+            continue
+        value_match = re.search(r'\bvalue="([^"]*)"', tag, re.IGNORECASE)
+        payload[name_match.group(1)] = value_match.group(1) if value_match else ""
+    if "cmsauthenticitytoken" not in payload:
+        raise SystemExit("Could not find Libri confirmation token.")
+    payload["module_fnc[secondary]"] = "processStep"
+    return payload
+
+
+def submit_reviewed_order(opener, review_url: str, review_html: str, output_dir: Path) -> bool:
     try:
-        confirm_url, confirm_html = fetch(opener, step2_url, payload)
-        (output_dir / "libri_confirm_order.html").write_text(confirm_html, encoding="utf-8")
-        (output_dir / "libri_confirm_order_url.txt").write_text(confirm_url + "\n", encoding="utf-8")
-
-        if page_has_success_text(confirm_html):
-            (output_dir / "libri_submit_response.html").write_text(confirm_html, encoding="utf-8")
-            print("✓ Order successfully submitted to Libri!")
-            return True
-
-        validate_confirmation_page(confirm_html, eans, customer_data)
-        return submit_final_confirmation(opener, confirm_url, confirm_html, output_dir)
-    except Exception as e:
-        print(f"✗ Error submitting order: {e}")
-        return False
+        payload = final_form_payload(review_html)
+    except SystemExit:
+        # Preserve the more tolerant upstream parser for harmless Libri markup variations.
+        payload = choose_final_confirmation_payload(review_html)
+    print("Submitting final Libri confirmation.")
+    _, response_html = fetch(opener, review_url, payload)
+    (output_dir / "libri_submit_response.html").write_text(response_html, encoding="utf-8")
+    if page_has_success_text(response_html):
+        print("✓ Order successfully submitted to Libri!")
+        return True
+    print("⚠ Final response received but success was not confirmed. Check libri_submit_response.html")
+    return False
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -465,6 +569,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--env", default=".env")
     parser.add_argument("--state", default=str(DEFAULT_STATE_PATH), help="Persistent JSON state for submitted Libri orders.")
     parser.add_argument("--allow-existing-basket", action="store_true", help="Allow non-empty basket")
+    submission_mode = parser.add_mutually_exclusive_group()
+    submission_mode.add_argument(
+        "--submit",
+        action="store_true",
+        help="Submit after verifying the Libri review step (the legacy default).",
+    )
+    submission_mode.add_argument(
+        "--review-only",
+        action="store_true",
+        help="Prepare and verify the Libri review step without placing the order.",
+    )
     return parser
 
 
@@ -492,22 +607,31 @@ def main(argv: list[str] | None = None) -> int:
     if not basket_is_empty(page_html) and not basket_matches_expected(page_html, eans):
         raise SystemExit("Libri basket is not empty and does not match this TikTok order.")
 
-    print(f"Adding or reusing {len(eans)} items in basket...")
-    basket_html = add_eans_to_basket(opener, eans, output_dir)
+    print(f"Ensuring {len(eans)} items are in basket...")
+    basket_html = ensure_eans_in_basket(opener, page_html, eans, output_dir)
 
     print(f"Moving to checkout with reference: {reference}")
-    step2_html, item_quantities, step2_url = post_customer_checkout_step(opener, basket_html, reference, output_dir)
+    step2_url, step2_html, item_quantities = post_customer_checkout_step(
+        opener, basket_html, eans, reference, output_dir
+    )
 
-    print(f"Filling customer data and submitting order...")
-    success = fill_customer_data_and_submit(opener, step2_html, step2_url, customer_data, item_quantities, eans, output_dir)
+    print("Filling customer data and opening Libri review step...")
+    review_url, review_html = post_customer_data(opener, step2_url, step2_html, customer_data, output_dir)
+    review_text = verify_review(review_html, eans, customer_data, order_dir)
+    (output_dir / "libri_review_summary.txt").write_text(review_text, encoding="utf-8")
 
-    if success:
+    should_submit = args.submit or not args.review_only
+    if not should_submit:
+        print(f"Review prepared and verified. No order submitted. See {output_dir}.")
+        return 0
+
+    print("Submitting the verified order to Libri...")
+    if submit_reviewed_order(opener, review_url, review_html, output_dir):
         mark_submitted(state_path, order_dir, eans)
         print(f"Order submission completed. See {output_dir} for details.")
         return 0
-    else:
-        print(f"Order submission may have failed. Review {output_dir}/libri_submit_response.html")
-        return 1
+    print(f"Order submission response was not confirmed. Review {output_dir}/libri_submit_response.html")
+    return 1
 
 
 if __name__ == "__main__":

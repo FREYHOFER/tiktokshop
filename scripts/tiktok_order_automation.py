@@ -437,7 +437,18 @@ def normalize_api_address(order: dict) -> CustomerAddress:
     name = first_value(address, "name", "full_name", "recipient_name")
     if not name and (first or last):
         name = f"{first} {last}".strip()
-    city = first_value(address, "city", "city_name")
+    district_info = address.get("district_info") or []
+    district_levels: dict[str, str] = {}
+    if isinstance(district_info, list):
+        for level in district_info:
+            if not isinstance(level, dict):
+                continue
+            level_code = clean(level.get("address_level")).upper()
+            level_name = clean(level.get("address_name"))
+            if level_code and level_name:
+                district_levels[level_code] = level_name
+
+    city = first_value(address, "city", "city_name") or district_levels.get("L3", "")
     zipcode = first_value(address, "postal_code", "zipcode", "zip_code")
     full_address = first_value(address, "full_address", "address")
     if not full_address:
@@ -447,8 +458,8 @@ def normalize_api_address(order: dict) -> CustomerAddress:
         phone=first_value(address, "phone_number", "phone", "mobile"),
         email=first_value(address, "email"),
         country=first_value(address, "region_code", "country", "country_code"),
-        state=first_value(address, "state", "state_name", "province"),
-        district=first_value(address, "district", "district_info", "district_name"),
+        state=first_value(address, "state", "state_name", "province") or district_levels.get("L1", ""),
+        district=first_value(address, "district", "district_name") or district_levels.get("L2", ""),
         city=city,
         zipcode=zipcode,
         street=lines[0] if lines else "",
@@ -584,7 +595,7 @@ def write_address_csv(path: Path, order: AutomationOrder) -> None:
         "full_address",
     ]
     with path.open("w", encoding="utf-8-sig", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer = csv.DictWriter(fh, fieldnames=fieldnames, delimiter=";")
         writer.writeheader()
         row = {key: getattr(order.address, key, "") for key in fieldnames if hasattr(order.address, key)}
         row["order_id"] = order.order_id
@@ -658,6 +669,7 @@ def prepare_orders(
     rebuild: bool,
     ignore_state: bool,
     skip_empty_runs: bool,
+    retry_unsubmitted: bool = False,
 ) -> tuple[Path | None, dict[str, str]]:
     state = load_state(state_path)
     prepared = state.setdefault("prepared_orders", {})
@@ -669,9 +681,12 @@ def prepare_orders(
         if not order_key:
             statuses[order_key] = "skipped_missing_order_id"
             continue
-        if not ignore_state and order_key in prepared and not rebuild:
-            statuses[order_key] = "skipped_already_prepared"
-            continue
+        existing = prepared.get(order_key)
+        if not ignore_state and existing and not rebuild:
+            already_submitted = clean(existing.get("libri_submission_status") or existing.get("status")) == "submitted_to_libri"
+            if not retry_unsubmitted or already_submitted:
+                statuses[order_key] = "skipped_already_submitted" if already_submitted else "skipped_already_prepared"
+                continue
         valid_lines = [line for line in order.lines if line.ean and line.quantity > 0]
         if not valid_lines:
             statuses[order_key] = "review_no_valid_ean_lines"
@@ -725,7 +740,7 @@ def fetch_from_api(args: argparse.Namespace, env: dict[str, str], env_path: Path
     return [normalize_api_order(order, "tiktok_api_search_only") for order in search_orders]
 
 
-def run_once(args: argparse.Namespace) -> tuple[Path | None, dict[str, str], int]:
+def run_once(args: argparse.Namespace) -> tuple[Path | None, dict[str, str], int, int]:
     env_path = Path(args.env)
     env = load_env_file(env_path)
     customer_number = env_value(env, "LIBRI_CUSTOMER_NUMBER")
@@ -741,47 +756,101 @@ def run_once(args: argparse.Namespace) -> tuple[Path | None, dict[str, str], int
         rebuild=args.rebuild,
         ignore_state=args.ignore_state,
         skip_empty_runs=args.skip_empty_runs,
+        retry_unsubmitted=args.auto_submit_libri,
     )
 
     # Auto-submit orders to Libri if requested
+    submit_failed_count = 0
     if args.auto_submit_libri and run_dir is not None:
-        auto_submit_prepared_orders(run_dir, statuses, env_path)
+        submission_result = auto_submit_prepared_orders(
+            run_dir,
+            statuses,
+            env_path,
+            allow_existing_basket=args.allow_existing_libri_basket,
+        )
+        submit_failed_count = submission_result["failed"]
+        write_summary(run_dir / "orders_summary.csv", orders, statuses)
+        update_submission_state(Path(args.state), statuses)
 
-    return run_dir, statuses, len(orders)
+    return run_dir, statuses, len(orders), submit_failed_count
 
 
-def auto_submit_prepared_orders(run_dir: Path, statuses: dict[str, str], env_path: Path) -> None:
+def auto_submit_prepared_orders(
+    run_dir: Path,
+    statuses: dict[str, str],
+    env_path: Path,
+    allow_existing_basket: bool = False,
+) -> dict[str, int]:
     """Automatically submit prepared orders to Libri."""
     submitted = 0
     failed = 0
-    for order_id, status in statuses.items():
+    for order_id, status in list(statuses.items()):
         if status.startswith("prepared"):
             order_dir = run_dir / safe_filename(order_id)
             if not order_dir.exists():
                 print(f"⚠ Order directory not found: {order_dir}")
+                statuses[order_id] = "libri_submission_failed"
                 failed += 1
                 continue
 
             print(f"Auto-submitting order {order_id} to Libri...")
             script_path = Path(__file__).resolve().parent / "libri_customer_submit.py"
+            command = [
+                sys.executable,
+                str(script_path),
+                "--order-dir",
+                str(order_dir),
+                "--env",
+                str(env_path),
+                "--submit",
+            ]
+            if allow_existing_basket:
+                command.append("--allow-existing-basket")
             try:
                 result = subprocess.run(
-                    [sys.executable, str(script_path), "--order-dir", str(order_dir), "--env", str(env_path)],
+                    command,
                     capture_output=True,
                     text=True,
-                    timeout=120,
+                    timeout=180,
                 )
+                submission_dir = order_dir / "libri_submission"
+                submission_dir.mkdir(parents=True, exist_ok=True)
+                (submission_dir / "automation_submit_stdout.txt").write_text(result.stdout, encoding="utf-8")
+                (submission_dir / "automation_submit_stderr.txt").write_text(result.stderr, encoding="utf-8")
                 if result.returncode == 0:
                     print(f"✓ Order {order_id} submitted successfully")
+                    statuses[order_id] = "submitted_to_libri"
                     submitted += 1
                 else:
                     print(f"✗ Order {order_id} submission failed: {result.stderr}")
+                    statuses[order_id] = "libri_submission_failed"
                     failed += 1
             except Exception as e:
                 print(f"✗ Error submitting order {order_id}: {e}")
+                statuses[order_id] = "libri_submission_failed"
                 failed += 1
 
     print(f"Libri submissions: {submitted} success, {failed} failed")
+    return {"submitted": submitted, "failed": failed}
+
+
+def update_submission_state(state_path: Path, statuses: dict[str, str]) -> None:
+    state = load_state(state_path)
+    prepared = state.setdefault("prepared_orders", {})
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    changed = False
+    for order_id, status in statuses.items():
+        if status not in {"submitted_to_libri", "libri_submission_failed"}:
+            continue
+        entry = prepared.setdefault(order_id, {})
+        entry["status"] = status
+        entry["libri_submission_status"] = status
+        entry["libri_submission_updated_at"] = now
+        if status == "submitted_to_libri":
+            entry["libri_submitted_at"] = now
+        changed = True
+    if changed:
+        save_state(state_path, state)
 
 
 def seconds_until_run_at(run_at: str, timezone_name: str) -> float:
@@ -800,10 +869,15 @@ def watch(args: argparse.Namespace) -> int:
             wait_seconds = seconds_until_run_at(args.run_at, args.timezone)
             print(f"Waiting until next {args.run_at} {args.timezone} run ({int(wait_seconds)} seconds).", flush=True)
             time.sleep(wait_seconds)
-        run_dir, statuses, order_count = run_once(args)
+        run_dir, statuses, order_count, submit_failed_count = run_once(args)
         prepared_count = sum(1 for status in statuses.values() if status.startswith("prepared"))
+        submitted_count = sum(1 for status in statuses.values() if status == "submitted_to_libri")
         output_text = str(run_dir.resolve()) if run_dir else "no new output"
-        print(f"{dt.datetime.now().isoformat(timespec='seconds')} - found {order_count}, prepared {prepared_count}: {output_text}", flush=True)
+        print(
+            f"{dt.datetime.now().isoformat(timespec='seconds')} - found {order_count}, "
+            f"prepared {prepared_count}, submitted {submitted_count}, submit_failed {submit_failed_count}: {output_text}",
+            flush=True,
+        )
         if not args.run_at:
             time.sleep(max(args.poll_minutes, 1) * 60)
 
@@ -833,6 +907,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Submit prepared orders to Libri after file generation. This places real Libri orders.",
     )
+    parser.add_argument(
+        "--allow-existing-libri-basket",
+        action="store_true",
+        help="Allow a non-empty Libri basket; only the verified TikTok order EANs are selected for checkout.",
+    )
     return parser
 
 
@@ -840,19 +919,23 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.watch:
         return watch(args)
-    run_dir, statuses, order_count = run_once(args)
+    run_dir, statuses, order_count, submit_failed_count = run_once(args)
     prepared_count = sum(1 for status in statuses.values() if status.startswith("prepared"))
+    submitted_count = sum(1 for status in statuses.values() if status == "submitted_to_libri")
     review_count = sum(1 for status in statuses.values() if "review" in status or "warning" in status)
+    submit_failure_count = sum(1 for status in statuses.values() if status == "libri_submission_failed")
     skipped_count = sum(1 for status in statuses.values() if status.startswith("skipped"))
     print(f"Orders found: {order_count}")
     print(f"Prepared: {prepared_count}")
+    print(f"Submitted to Libri: {submitted_count}")
+    print(f"Libri submission failed: {submit_failure_count}")
     print(f"Needs review/warnings: {review_count}")
     print(f"Skipped: {skipped_count}")
     if run_dir:
         print(f"Output: {run_dir.resolve()}")
     else:
         print("Output: none (no new orders)")
-    return 0
+    return 1 if submit_failed_count else 0
 
 
 if __name__ == "__main__":

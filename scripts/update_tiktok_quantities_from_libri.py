@@ -533,6 +533,7 @@ def run(args: argparse.Namespace) -> int:
         return 1 if not log_rows else 0
 
     opener = login(env_path) if args.refresh_libri else None
+    libri_request_count = 0
 
     for sku in tiktok_skus:
         row = base_log_row(sku)
@@ -548,7 +549,31 @@ def run(args: argparse.Namespace) -> int:
                 write_csv(log_path, log_rows)
                 continue
 
-            stock = fetch_libri_stock(sku.ean, opener, libri_page_dir) if args.refresh_libri else read_local_libri_stock(sku.ean, args.local_libri_dir)
+            if args.refresh_libri:
+                stock = None
+                last_libri_error: Exception | None = None
+                for attempt in range(max(args.libri_retries, 0) + 1):
+                    try:
+                        if (
+                            args.libri_session_refresh_every > 0
+                            and libri_request_count >= args.libri_session_refresh_every
+                        ):
+                            opener = login(env_path)
+                            libri_request_count = 0
+                        stock = fetch_libri_stock(sku.ean, opener, libri_page_dir)
+                        libri_request_count += 1
+                        break
+                    except Exception as exc:
+                        last_libri_error = exc
+                        if attempt >= max(args.libri_retries, 0):
+                            raise
+                        time.sleep(max(args.libri_retry_delay, 0))
+                        opener = login(env_path)
+                        libri_request_count = 0
+                if stock is None:
+                    raise RuntimeError(f"Libri stock fetch failed: {last_libri_error}")
+            else:
+                stock = read_local_libri_stock(sku.ean, args.local_libri_dir)
             row["libri_page"] = str(stock.page_path)
             if stock.title and not row["title"]:
                 row["title"] = stock.title
@@ -561,7 +586,8 @@ def run(args: argparse.Namespace) -> int:
             quantity = target_quantity(stock.quantity, args.max_quantity)
             row["libri_quantity"] = stock.quantity
             row["quantity_sent"] = quantity
-            if sku.current_quantity == quantity and not args.update_unchanged:
+            quantity_matches = sku.current_quantity == quantity or (sku.current_quantity is None and quantity == 0)
+            if quantity_matches and not args.update_unchanged:
                 row.update(status="unchanged", message=stock.message or "TikTok quantity already matches Libri.")
             elif args.dry_run:
                 row.update(status="dry_run_update", message=stock.message or "Would update TikTok inventory.")
@@ -631,6 +657,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true", help="Fetch and log quantities without writing to TikTok.")
     parser.add_argument("--update-unchanged", action="store_true", help="Send TikTok updates even when quantities already match.")
     parser.add_argument("--libri-delay", type=float, default=0.3)
+    parser.add_argument("--libri-retries", type=int, default=3, help="Re-login and retry failed Libri page requests.")
+    parser.add_argument("--libri-retry-delay", type=float, default=1.0)
+    parser.add_argument(
+        "--libri-session-refresh-every",
+        type=int,
+        default=20,
+        help="Proactively renew the Mein.Libri session after this many product requests. Use 0 to disable.",
+    )
     parser.add_argument("--tiktok-delay", type=float, default=0.2)
     parser.add_argument("--stop-on-error", action=argparse.BooleanOptionalAction, default=False)
     return parser

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Book Video Renderer</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./generic-video.css?v=1">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="stage-shell">
+    <main id="video-stage" aria-label="Book marketing video">
+    <canvas id="video-canvas"></canvas>
+    <div class="vignette"></div>
+    <div class="grain"></div>
+    <div id="light-flash" class="light-flash"></div>
+
+    <div id="hook" class="copy hook"></div>
+    <div id="feature" class="copy feature"></div>
+
+    <section id="endcard" class="endcard" aria-label="Book information">
+      <p id="end-author"></p>
+      <h1 id="end-title"></h1>
+      <span id="end-label"></span>
+    </section>
+
+    <div id="cta" class="cta">
+      <span id="cta-prefix">JETZT IM</span>
+      <strong id="cta-main">TIKTOK SHOP</strong>
+    </div>
+    </main>
+  </div>
+
+  <script type="module" src="./generic-video.js?v=1"></script>
+</body>
+</html>

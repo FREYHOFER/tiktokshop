@@ -45,15 +45,35 @@ $Settings = New-ScheduledTaskSettingsSet `
   -RestartCount 3 `
   -RestartInterval (New-TimeSpan -Minutes 10)
 
-Register-ScheduledTask `
-  -TaskName $TaskName `
-  -Action $Action `
-  -Trigger $Trigger `
-  -Settings $Settings `
-  -Description "Refresh Libri stock and update matching TikTok Shop LIBRI-* SKU quantities." `
-  -Force
+try {
+  Register-ScheduledTask `
+    -TaskName $TaskName `
+    -Action $Action `
+    -Trigger $Trigger `
+    -Settings $Settings `
+    -Description "Refresh Libri stock and update matching TikTok Shop LIBRI-* SKU quantities." `
+    -Force
 
-Write-Host "Installed scheduled task: $TaskName"
+  Write-Host "Installed scheduled task: $TaskName"
+}
+catch [Microsoft.Management.Infrastructure.CimException] {
+  $WatcherPath = Join-Path $Workspace "scripts\watch_inventory_update_daily.ps1"
+  $Startup = [Environment]::GetFolderPath("Startup")
+  $ShortcutPath = Join-Path $Startup "$TaskName.lnk"
+  $Shell = New-Object -ComObject WScript.Shell
+  $Shortcut = $Shell.CreateShortcut($ShortcutPath)
+  $Shortcut.TargetPath = "powershell.exe"
+  $Shortcut.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$WatcherPath`" -RunAt `"$RunAt`""
+  $Shortcut.WorkingDirectory = $Workspace
+  $Shortcut.Save()
+
+  Start-Process `
+    -FilePath "powershell.exe" `
+    -ArgumentList "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$WatcherPath`" -RunAt `"$RunAt`"" `
+    -WindowStyle Hidden
+  Write-Host "Installed and started user Startup watcher: $ShortcutPath"
+}
+
 Write-Host "Daily run time: $RunAt"
 if ($DryRun) {
   Write-Host "Mode: dry run"

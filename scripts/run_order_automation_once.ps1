@@ -10,7 +10,10 @@ $ScriptArgs = @(
   "$Workspace\scripts\tiktok_order_automation.py",
   "--env", "$Workspace\.env",
   "--output-root", "$Workspace\outputs\order_automation",
-  "--state", "$Workspace\outputs\order_automation\state.json"
+  "--state", "$Workspace\outputs\order_automation\state.json",
+  "--hours-back", "0",
+  "--auto-submit-libri",
+  "--allow-existing-libri-basket"
 )
 if ($SkipEmptyRuns) {
   $ScriptArgs += "--skip-empty-runs"

@@ -59,24 +59,18 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(f"<html><body><h1>Error exchanging code</h1><pre>{exc}</pre></body></html>".encode())
             # don't shut down server on exchange error; let user retry
             return
-        token = None
-        if isinstance(result, dict):
-            data = result.get("data") if isinstance(result.get("data"), dict) else result
-            token = data.get("access_token") or data.get("accessToken") or result.get("access_token")
-        if not token:
+        data = exch.token_payload(result)
+        if not (data.get("access_token") or data.get("accessToken")):
             self.wfile.write(b"<html><body><h1>Token not found in response</h1><pre>")
             self.wfile.write(json.dumps(result, ensure_ascii=False, indent=2).encode())
             self.wfile.write(b"</pre></body></html>")
             return
 
-        # write token to env
-        env["TIKTOK_ACCESS_TOKEN"] = token.strip().strip('"')
-        backup = env_path.with_suffix(env_path.suffix + ".bak")
-        if env_path.exists():
-            env_path.rename(backup)
+        exch.update_env_with_tokens(env, result)
+        exch.backup_env_file(env_path)
         exch.write_env(env_path, env)
 
-        self.wfile.write(b"<html><body><h1>Success</h1><p>Access token saved to .env</p></body></html>")
+        self.wfile.write(b"<html><body><h1>Success</h1><p>TikTok token values saved to .env</p></body></html>")
         # shutdown server cleanly in a new thread
         threading.Thread(target=self.server.shutdown, daemon=True).start()
 

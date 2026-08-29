@@ -1,0 +1,170 @@
+:root {
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-synthesis: none;
+  color: #f5f7f7;
+  background: #050608;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #050608;
+}
+
+body {
+  display: grid;
+  place-items: center;
+}
+
+#video-stage {
+  position: relative;
+  width: 720px;
+  height: 1280px;
+  flex: none;
+  overflow: hidden;
+  background: #050608;
+  transform-origin: center;
+}
+
+#video-canvas,
+.vignette,
+.grain,
+.switch-flash {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#video-canvas {
+  display: block;
+}
+
+.vignette {
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 46%, transparent 38%, rgba(0, 0, 0, 0.72) 100%);
+}
+
+.grain {
+  pointer-events: none;
+  opacity: 0.08;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.42'/%3E%3C/svg%3E");
+  mix-blend-mode: soft-light;
+}
+
+.switch-flash {
+  pointer-events: none;
+  background: #c8fbff;
+  opacity: 0;
+  mix-blend-mode: screen;
+}
+
+.copy,
+.endcard,
+.cta,
+.age-note {
+  position: absolute;
+  z-index: 3;
+  opacity: 0;
+  letter-spacing: 0;
+  text-align: center;
+  text-shadow: 0 3px 24px rgba(0, 0, 0, 0.9);
+}
+
+.copy {
+  left: 70px;
+  right: 120px;
+  top: 146px;
+  font-size: 44px;
+  font-weight: 750;
+  line-height: 1.08;
+}
+
+.question {
+  color: #8cecff;
+  font-size: 38px;
+}
+
+.genre {
+  top: 150px;
+  bottom: auto;
+  color: #bceffc;
+  font-size: 25px;
+  font-weight: 650;
+}
+
+.endcard {
+  top: 118px;
+  left: 58px;
+  right: 118px;
+}
+
+.endcard p,
+.endcard h1,
+.endcard span {
+  margin: 0;
+}
+
+.endcard p {
+  color: #bceffc;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.endcard h1 {
+  margin-top: 4px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 56px;
+  line-height: 1;
+  font-weight: 500;
+}
+
+.endcard span {
+  display: block;
+  margin-top: 10px;
+  color: #b7bdc2;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.cta {
+  right: 120px;
+  bottom: 280px;
+  left: 70px;
+  padding-top: 18px;
+  border-top: 2px solid rgba(80, 217, 244, 0.7);
+}
+
+.cta span,
+.cta strong {
+  display: block;
+}
+
+.cta span {
+  color: #d9e3e6;
+  font-size: 19px;
+  font-weight: 650;
+}
+
+.cta strong {
+  margin-top: 2px;
+  color: #65e8ff;
+  font-size: 38px;
+  line-height: 1;
+}
+
+.age-note {
+  right: 120px;
+  bottom: 236px;
+  color: rgba(218, 223, 225, 0.68);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+}

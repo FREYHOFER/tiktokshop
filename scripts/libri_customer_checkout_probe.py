@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from collections import Counter
 import html
 import json
 import re
@@ -82,19 +83,48 @@ def add_eans_to_basket(opener, eans: list[str], output_dir: Path) -> str:
     return response_html
 
 
-def parse_basket_items(page_html: str) -> dict[str, str]:
+def parse_basket_items(page_html: str) -> list[dict[str, str]]:
     decoded = html.unescape(page_html)
-    items: dict[str, str] = {}
-    pattern = re.compile(r'name="item\[([^\]]+)\]\[quantity\]"[^>]*value="([^"]*)"', re.IGNORECASE)
-    for item_id, quantity in pattern.findall(decoded):
-        items[item_id] = quantity or "1"
+    items: list[dict[str, str]] = []
+    for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>", decoded, re.IGNORECASE | re.DOTALL):
+        ean_match = re.search(r'class="column-article_number"[^>]*>\s*(\d{13})\s*<', row, re.IGNORECASE)
+        quantity_match = re.search(
+            r'name="item\[([^\]]+)\]\[quantity\]"[^>]*value="([^"]*)"',
+            row,
+            re.IGNORECASE,
+        )
+        if ean_match and quantity_match:
+            items.append(
+                {
+                    "item_id": quantity_match.group(1),
+                    "ean": ean_match.group(1),
+                    "quantity": quantity_match.group(2) or "1",
+                }
+            )
     return items
 
 
-def post_customer_checkout_step(opener, basket_html: str, reference: str, output_dir: Path) -> Path:
+def select_order_items(page_html: str, eans: list[str]) -> dict[str, str]:
+    requested = Counter(eans)
+    selected: dict[str, str] = {}
+    found: set[str] = set()
+    for item in parse_basket_items(page_html):
+        ean = item["ean"]
+        if ean in requested:
+            selected[item["item_id"]] = str(requested[ean])
+            found.add(ean)
+    missing = sorted(set(requested) - found)
+    if missing:
+        raise SystemExit("Expected EANs not found in Libri basket after adding: " + ", ".join(missing))
+    return selected
+
+
+def post_customer_checkout_step(
+    opener, basket_html: str, eans: list[str], reference: str, output_dir: Path
+) -> Path:
     decoded = html.unescape(basket_html)
     token = csrf_token(decoded)
-    item_quantities = parse_basket_items(decoded)
+    item_quantities = select_order_items(decoded, eans)
     if not item_quantities:
         raise SystemExit("No basket item quantity fields found after adding EANs.")
 
@@ -103,8 +133,10 @@ def post_customer_checkout_step(opener, basket_html: str, reference: str, output
         "checkout": "1",
         "cmsauthenticitytoken": token,
     }
-    for item_id, quantity in item_quantities.items():
-        payload[f"item[{item_id}][quantity]"] = quantity
+    for item in parse_basket_items(decoded):
+        item_id = item["item_id"]
+        payload[f"item[{item_id}][quantity]"] = item["quantity"]
+    for item_id in item_quantities:
         payload[f"item[{item_id}][order]"] = "1"
         payload[f"data[confirm][orderReference][positionReference][{item_id}]"] = reference
 
@@ -146,7 +178,7 @@ def main() -> int:
             "Libri basket is not empty. Clear it manually or rerun with --allow-existing-basket after checking it."
         )
     basket_html = add_eans_to_basket(opener, eans, output_dir)
-    step2_path = post_customer_checkout_step(opener, basket_html, reference, output_dir)
+    step2_path = post_customer_checkout_step(opener, basket_html, eans, reference, output_dir)
     print(f"Saved customer checkout step 2: {step2_path.resolve()}")
     print("No final Libri order was submitted.")
     return 0

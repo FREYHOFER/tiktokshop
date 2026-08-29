@@ -1,0 +1,10 @@
+{
+  "name": "tiktokshop-book-video-renderer",
+  "private": true,
+  "scripts": {
+    "render-book-video": "node scripts/render_book_video.cjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.53.0"
+  }
+}

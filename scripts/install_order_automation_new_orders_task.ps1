@@ -30,7 +30,7 @@ Register-ScheduledTask `
   -Action $Action `
   -Trigger $Trigger `
   -Settings $Settings `
-  -Description "Poll TikTok Shop for new awaiting-shipment orders and prepare Libri customer-order files." `
+  -Description "Poll TikTok Shop for new awaiting-shipment orders and submit verified Libri customer orders." `
   -Force
 
 Start-ScheduledTask -TaskName $TaskName

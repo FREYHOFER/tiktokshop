@@ -17,7 +17,10 @@ $ScriptArgs = @(
   "--state", "$Workspace\outputs\order_automation\state.json",
   "--watch",
   "--poll-minutes", "$PollMinutes",
-  "--skip-empty-runs"
+  "--skip-empty-runs",
+  "--hours-back", "0",
+  "--auto-submit-libri",
+  "--allow-existing-libri-basket"
 )
 
 if (-not $Python) {

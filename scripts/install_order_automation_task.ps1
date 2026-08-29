@@ -19,7 +19,7 @@ Register-ScheduledTask `
   -Action $Action `
   -Trigger $Trigger `
   -Settings $Settings `
-  -Description "Fetch TikTok Shop awaiting-shipment orders and prepare Libri customer-order files." `
+  -Description "Fetch TikTok Shop awaiting-shipment orders and submit verified Libri customer orders." `
   -Force
 
 Write-Host "Installed scheduled task: $TaskName"

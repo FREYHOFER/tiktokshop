@@ -30,8 +30,19 @@ if (-not $Python) {
     throw "Python was not found on PATH."
   }
   & $Python -3 @ScriptArgs
-  exit $LASTEXITCODE
+  $ExitCode = $LASTEXITCODE
+} else {
+  & $Python @ScriptArgs
+  $ExitCode = $LASTEXITCODE
 }
 
-& $Python @ScriptArgs
-exit $LASTEXITCODE
+if ($ExitCode -eq 0 -and -not $DryRun) {
+  $StateDirectory = Join-Path $Workspace "outputs\inventory_updates"
+  New-Item -ItemType Directory -Path $StateDirectory -Force | Out-Null
+  Set-Content `
+    -LiteralPath (Join-Path $StateDirectory "last_success_date.txt") `
+    -Value (Get-Date -Format "yyyy-MM-dd") `
+    -Encoding ascii
+}
+
+exit $ExitCode

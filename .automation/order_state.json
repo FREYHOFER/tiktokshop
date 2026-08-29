@@ -26,9 +26,12 @@
     },
     "576920602882775881": {
       "package_id": "1154212325749267273",
-      "prepared_at": "2026-07-07T16:29:25.671032+00:00",
-      "run_dir": "/home/runner/work/tiktokshop/tiktokshop/outputs/order_automation/20260707_162925",
-      "status": "prepared_with_warnings"
+      "libri_submission_status": "submitted_to_libri",
+      "libri_submission_updated_at": "2026-07-26T14:49:00+00:00",
+      "libri_submitted_at": "2026-07-26T14:49:00+00:00",
+      "prepared_at": "2026-07-26T14:48:01.339250+00:00",
+      "run_dir": "C:\\Users\\Stipendiat3\\tiktokshop\\outputs\\order_automation\\20260726_164801",
+      "status": "submitted_to_libri"
     }
   }
 }
