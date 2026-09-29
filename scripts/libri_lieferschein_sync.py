@@ -654,7 +654,8 @@ def main(argv: list[str] | None = None) -> int:
                 detail = overdue_detail(submission, grace_hours)
                 if order_match:
                     detail += " The Libri order history match was found."
-                if args.create_issues and not note.get("delivery_note_missing_issue_reported"):
+                issue_already_reported = bool(note.get("delivery_note_missing_issue_reported"))
+                if args.create_issues and not issue_already_reported:
                     create_issue(
                         f"Libri delivery note missing after order submission ({order_id})",
                         (
@@ -665,7 +666,8 @@ def main(argv: list[str] | None = None) -> int:
                         ),
                     )
                     note["delivery_note_missing_issue_reported"] = now_utc()
-                failures += 1
+                if not issue_already_reported:
+                    failures += 1
             rows.append(
                 {
                     "order_id": order_id,
@@ -704,13 +706,15 @@ def main(argv: list[str] | None = None) -> int:
                     "detail": "Delivery note found, but no tracking number was detected.",
                 }
             )
-            if args.create_issues and not note.get("tracking_issue_reported"):
+            issue_already_reported = bool(note.get("tracking_issue_reported"))
+            if args.create_issues and not issue_already_reported:
                 create_issue(
                     f"Libri Lieferschein found but tracking missing ({order_id})",
                     "A Libri delivery-note page was found for this TikTok order, but the automation could not detect a tracking number. No customer address data is included in this issue.",
                 )
                 note["tracking_issue_reported"] = now_utc()
-            failures += 1
+            if not issue_already_reported:
+                failures += 1
             continue
 
         note.update({"tracking_status": "found", "tracking_number": tracking_number, "carrier": carrier})
@@ -752,13 +756,15 @@ def main(argv: list[str] | None = None) -> int:
                     "detail": detail,
                 }
             )
-            if args.create_issues and not note.get("tiktok_issue_reported"):
+            issue_already_reported = bool(note.get("tiktok_issue_reported"))
+            if args.create_issues and not issue_already_reported:
                 create_issue(
                     f"TikTok tracking update failed ({order_id})",
                     "A Libri tracking number was found, but TikTok fulfillment update failed. No customer address data is included in this issue. Check the workflow logs and .automation/libri_order_state.json for the technical status.",
                 )
                 note["tiktok_issue_reported"] = now_utc()
-            failures += 1
+            if not issue_already_reported:
+                failures += 1
 
     save_state(state_path, state)
     write_summary(output_dir / "summary.csv", rows)
