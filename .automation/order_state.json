@@ -41,9 +41,9 @@
     },
     "576954949574892368": {
       "package_id": "1154404876342303568",
-      "prepared_at": "2026-09-29T07:25:28.000693+00:00",
-      "run_dir": "/home/runner/work/tiktokshop/tiktokshop/outputs/order_automation/20260929_072527",
-      "status": "review_no_valid_ean_lines"
+      "prepared_at": "2026-09-29T07:33:52.123694+00:00",
+      "run_dir": "/home/runner/work/tiktokshop/tiktokshop/outputs/order_automation/20260929_073352",
+      "status": "prepared"
     }
   }
 }
