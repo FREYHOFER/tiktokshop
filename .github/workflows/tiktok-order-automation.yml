@@ -1,6 +1,8 @@
 name: TikTok order automation
 
 on:
+  schedule:
+    - cron: "*/15 * * * *"
   push:
     branches:
       - main
@@ -372,7 +374,9 @@ jobs:
           git push
 
       - name: Fail workflow if Lieferschein sync failed
-        if: steps.lieferschein-sync.outcome == 'failure'
+        # Scheduled runs already create deduplicated issues for delivery/tracking
+        # problems. Do not keep every later intake check red for an old issue.
+        if: steps.lieferschein-sync.outcome == 'failure' && github.event_name != 'schedule'
 
         run: exit 1
 
