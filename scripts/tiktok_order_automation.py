@@ -700,8 +700,10 @@ def prepare_orders(
             continue
         existing = prepared.get(order_key)
         if not ignore_state and existing and not rebuild:
-            already_submitted = clean(existing.get("libri_submission_status") or existing.get("status")) == "submitted_to_libri"
-            if not retry_unsubmitted or already_submitted:
+            existing_status = clean(existing.get("libri_submission_status") or existing.get("status"))
+            already_submitted = existing_status == "submitted_to_libri"
+            retry_after_review = existing_status.startswith("review_")
+            if (not retry_unsubmitted and not retry_after_review) or already_submitted:
                 statuses[order_key] = "skipped_already_submitted" if already_submitted else "skipped_already_prepared"
                 continue
         valid_lines = [line for line in order.lines if line.ean and line.quantity > 0]
