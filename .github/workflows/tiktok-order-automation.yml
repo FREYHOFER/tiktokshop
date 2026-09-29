@@ -283,12 +283,12 @@ jobs:
           run_url = f"{os.environ['GITHUB_SERVER_URL']}/{repo}/actions/runs/{run_id}"
           artifact_name = f"libri-order-packages-{run_id}"
           libri_submit_outcome = os.environ.get("LIBRI_SUBMIT_OUTCOME", "")
-          if libri_submit_outcome == "failure":
-              title = f"TikTok order automation needs attention ({run_id})"
-              lead = "At least one prepared TikTok order could not be submitted to Libri."
-          else:
-              title = f"New TikTok order package processed ({run_id})"
-              lead = "New TikTok order package(s) were processed by the Libri automation."
+          if libri_submit_outcome != "failure":
+              print("Order package processed successfully; routine GitHub issue notification suppressed.")
+              raise SystemExit(0)
+
+          title = f"TikTok order automation needs attention ({run_id})"
+          lead = "At least one prepared TikTok order could not be submitted to Libri."
 
           payload = {
               "title": title,
