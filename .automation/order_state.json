@@ -25,13 +25,25 @@
       "status": "prepared_with_warnings"
     },
     "576920602882775881": {
-      "package_id": "1154212325749267273",
       "libri_submission_status": "submitted_to_libri",
       "libri_submission_updated_at": "2026-07-26T14:49:00+00:00",
       "libri_submitted_at": "2026-07-26T14:49:00+00:00",
+      "package_id": "1154212325749267273",
       "prepared_at": "2026-07-26T14:48:01.339250+00:00",
       "run_dir": "C:\\Users\\Stipendiat3\\tiktokshop\\outputs\\order_automation\\20260726_164801",
       "status": "submitted_to_libri"
+    },
+    "576953262463425036": {
+      "package_id": "1154396496121207308",
+      "prepared_at": "2026-09-29T07:25:27.996241+00:00",
+      "run_dir": "/home/runner/work/tiktokshop/tiktokshop/outputs/order_automation/20260929_072527",
+      "status": "prepared"
+    },
+    "576954949574892368": {
+      "package_id": "1154404876342303568",
+      "prepared_at": "2026-09-29T07:25:28.000693+00:00",
+      "run_dir": "/home/runner/work/tiktokshop/tiktokshop/outputs/order_automation/20260929_072527",
+      "status": "review_no_valid_ean_lines"
     }
   }
 }
