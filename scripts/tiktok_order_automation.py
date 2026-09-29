@@ -124,6 +124,22 @@ def extract_ean(*values: object) -> str:
     return ""
 
 
+# Verified exceptions for legacy TikTok listings whose Seller SKU is not an EAN.
+# Require both the SKU and the normalized title so a recycled SKU cannot silently
+# order the wrong Libri article.
+VERIFIED_EAN_OVERRIDES = {
+    (
+        "2022429",
+        "reminders of him - für immer ein teil von dir",
+    ): "9783423221696",
+}
+
+
+def verified_ean_override(seller_sku: object, product_name: object) -> str:
+    key = (clean(seller_sku), clean(product_name).casefold())
+    return VERIFIED_EAN_OVERRIDES.get(key, "")
+
+
 def parse_int(value: object, default: int = 0) -> int:
     text = clean(value).replace(",", ".")
     if not text:
@@ -487,6 +503,7 @@ def normalize_api_order(order: dict, source: str) -> AutomationOrder:
         seller_sku = first_value(item, "seller_sku", "seller_sku_id", "sku_seller_id")
         product_name = first_value(item, "product_name", "product_title", "sku_name", "item_name")
         ean = extract_ean(seller_sku, product_name, item.get("seller_note"))
+        ean = ean or verified_ean_override(seller_sku, product_name)
         warnings = []
         if not ean:
             warnings.append("missing_ean_from_seller_sku_or_product_name")
