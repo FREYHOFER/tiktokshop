@@ -40,6 +40,10 @@ DEFAULT_OUTPUT_ROOT = Path("outputs") / "libri_tracking_sync"
 DELIVERY_NOTE_PAGE_LIMIT = 20
 
 
+class NoMatchingOrder(RuntimeError):
+    """The delivery note does not belong to an awaiting TikTok order."""
+
+
 @dataclass
 class DeliveryNote:
     date: str = ""
@@ -192,10 +196,21 @@ def unique_order_match(pdf_text: str, orders: list) -> object:
         for order in orders
         if order_eans(order) == note_eans and recipient_matches(pdf_text, order.address.name)
     ]
+    if not matches:
+        raise NoMatchingOrder("Delivery note does not match an awaiting TikTok order.")
     if len(matches) != 1:
         ids = [order.order_id for order in matches]
         raise RuntimeError(f"Delivery note matched {len(matches)} TikTok orders (matches: {ids}).")
     return matches[0]
+
+
+def note_is_recent(note: DeliveryNote, hours_back: int) -> bool:
+    try:
+        note_date = dt.datetime.strptime(note.date, "%d.%m.%Y").replace(tzinfo=dt.timezone.utc)
+    except ValueError:
+        return False
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=max(hours_back, 1))
+    return note_date >= cutoff.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 def verify_dhl_tracking(tracking_number: str) -> dict:
@@ -354,7 +369,11 @@ def main(argv: list[str] | None = None) -> int:
     output_root = Path(args.output_root)
     state_path = Path(args.state)
     env = load_env_file(env_path)
-    provider_name = clean(env.get("TIKTOK_LIBRI_SHIPPING_PROVIDER")) or "DHL Paket"
+    provider_name = (
+        clean(env.get("TIKTOK_LIBRI_SHIPPING_PROVIDER"))
+        or clean(env.get("TIKTOK_SHIPPING_PROVIDER_NAME"))
+        or "DHL Paket"
+    )
     state = load_state(state_path)
     opener = login(env_path)
     client = TikTokShopClient(env, env_path)
@@ -364,6 +383,7 @@ def main(argv: list[str] | None = None) -> int:
     pending = [
         note
         for note in notes
+        if note_is_recent(note, args.hours_back)
         if (state["documents"].get(note.document_number) or {}).get("status") not in {"synced", "already_synced"}
     ]
     if args.limit > 0:
@@ -393,6 +413,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.live:
                 state["documents"][note.document_number] = result
                 save_state(state_path, state)
+        except NoMatchingOrder:
+            print(f"{note.document_number}: skipped - no matching awaiting TikTok order")
         except (RuntimeError, TikTokApiError, OSError, ValueError) as exc:
             errors += 1
             print(f"{note.document_number}: ERROR - {exc}", file=sys.stderr)

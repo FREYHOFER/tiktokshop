@@ -194,6 +194,18 @@ jobs:
             --update-tiktok \
             --create-issues
 
+      - name: Match Libri delivery-note PDFs and update TikTok tracking
+        id: pdf-tracking-sync
+        if: steps.required-secrets.outputs.available == 'true'
+        continue-on-error: true
+        run: |
+          python scripts/sync_libri_tracking_to_tiktok.py \
+            --env .env \
+            --state .automation/libri_tracking_sync_state.json \
+            --output-root outputs/libri_tracking_sync \
+            --hours-back 168 \
+            --live
+
       - name: Check for prepared files
         id: prepared-files
         if: always() && steps.required-secrets.outputs.available == 'true'
@@ -364,7 +376,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .automation/order_state.json .automation/libri_order_state.json
+          git add .automation/order_state.json .automation/libri_order_state.json .automation/libri_tracking_sync_state.json
           if git diff --cached --quiet; then
             echo "No automation-state changes."
             exit 0
@@ -378,6 +390,10 @@ jobs:
         # problems. Do not keep every later intake check red for an old issue.
         if: steps.lieferschein-sync.outcome == 'failure' && github.event_name != 'schedule'
 
+        run: exit 1
+
+      - name: Fail workflow if PDF tracking sync failed
+        if: steps.pdf-tracking-sync.outcome == 'failure'
         run: exit 1
 
       - name: Fail workflow if order run failed
