@@ -1,8 +1,13 @@
 {
   "documents": {
     "65950890": {
-      "attempts": 2,
-      "checked_at": "2026-09-30T14:45:40.100665+00:00",
+      "checked_at": "2026-09-30T14:50:13.781945+00:00",
+      "dhl": {
+        "carrier": "DHL Paket",
+        "status": "verification_unavailable",
+        "status_time": "",
+        "verification_error": "JSONDecodeError"
+      },
       "document": {
         "customer_number": "32164",
         "date": "29.09.2026",
@@ -12,12 +17,27 @@
         "tracking_number": "00340434263839019876",
         "value": "9,10 €"
       },
-      "error": "TikTok provider 'DHL' not found uniquely. Available: ['DACHSER', 'Deutsche Post Mail', 'DHL Paket', 'Raben Group', 'DHL Express', 'FedEx‘', 'Amazon Logistics + MCF', 'DPD Germany', 'TNT', 'UPS®', 'GLS Germany', 'Hermes', 'GEL', 'Kuehne + Nagel', 'Österreichische Post', 'Hellmann', 'XL Courier', 'Hermes Einrichtungs Service']",
-      "status": "error"
+      "eans": [
+        "9783423221696"
+      ],
+      "order_id": "576954949574892368",
+      "package_id": "1154404876342303568",
+      "provider_id": "7038796963025782530",
+      "provider_name": "DHL Paket",
+      "recipient": "Shania Hähnel",
+      "status": "synced",
+      "synced_at": "2026-09-30T14:50:14.596108+00:00",
+      "tiktok_package_status": "PROCESSING",
+      "tiktok_tracking_number": "00340434263839019876"
     },
     "65952565": {
-      "attempts": 2,
-      "checked_at": "2026-09-30T14:45:42.605629+00:00",
+      "checked_at": "2026-09-30T14:50:16.665449+00:00",
+      "dhl": {
+        "carrier": "DHL Paket",
+        "status": "verification_unavailable",
+        "status_time": "",
+        "verification_error": "JSONDecodeError"
+      },
       "document": {
         "customer_number": "32164",
         "date": "29.09.2026",
@@ -27,8 +47,18 @@
         "tracking_number": "00340434263839023187",
         "value": "11,05 €"
       },
-      "error": "TikTok provider 'DHL' not found uniquely. Available: ['DACHSER', 'Deutsche Post Mail', 'DHL Paket', 'Raben Group', 'DHL Express', 'FedEx‘', 'Amazon Logistics + MCF', 'DPD Germany', 'TNT', 'UPS®', 'GLS Germany', 'Hermes', 'GEL', 'Kuehne + Nagel', 'Österreichische Post', 'Hellmann', 'XL Courier', 'Hermes Einrichtungs Service']",
-      "status": "error"
+      "eans": [
+        "9783757702687"
+      ],
+      "order_id": "576953262463425036",
+      "package_id": "1154396496121207308",
+      "provider_id": "7038796963025782530",
+      "provider_name": "DHL Paket",
+      "recipient": "Svenja Pietsch",
+      "status": "synced",
+      "synced_at": "2026-09-30T14:50:17.461372+00:00",
+      "tiktok_package_status": "PROCESSING",
+      "tiktok_tracking_number": "00340434263839023187"
     }
   }
 }
