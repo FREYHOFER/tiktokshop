@@ -382,7 +382,6 @@ def main(argv: list[str] | None = None) -> int:
     env = load_env_file(env_path)
     provider_name = (
         clean(env.get("TIKTOK_LIBRI_SHIPPING_PROVIDER"))
-        or clean(env.get("TIKTOK_SHIPPING_PROVIDER_NAME"))
         or "DHL Paket"
     )
     state = load_state(state_path)
