@@ -219,8 +219,19 @@ def verify_dhl_tracking(tracking_number: str) -> dict:
         f"{DHL_TRACKING_URL}?{query}",
         headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"},
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        # DHL occasionally serves bot/challenge content to hosted CI runners.
+        # The number still originates from Libri's authenticated delivery-note
+        # page, so keep the DHL lookup as a best-effort corroboration only.
+        return {
+            "carrier": "DHL Paket",
+            "status": "verification_unavailable",
+            "status_time": "",
+            "verification_error": type(exc).__name__,
+        }
     shipments = payload.get("sendungen") or []
     shipment = next((item for item in shipments if clean(item.get("id")) == tracking_number), None)
     if not shipment or shipment.get("reasonForRejection"):
