@@ -142,7 +142,7 @@ jobs:
           logs = sorted(pathlib.Path("outputs/catalog_rotation").glob("*/catalog_rotation_log.csv"))
           if not logs:
               raise SystemExit("Catalog preflight produced no audit log.")
-          rows = list(csv.DictReader(logs[-1].open(encoding="utf-8-sig")))
+          rows = list(csv.DictReader(logs[-1].open(encoding="utf-8-sig"), delimiter=";"))
           creates = [row for row in rows if row["status"] == "planned_create"]
           retires = [row for row in rows if row["status"] == "planned_zero_inventory"]
           failures = [row for row in rows if row["status"] == "failed" or "error" in row["status"]]

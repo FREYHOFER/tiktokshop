@@ -110,7 +110,7 @@ jobs:
           logs = sorted(pathlib.Path("outputs/inventory_updates").glob("*/inventory_update_log.csv"))
           if not logs:
               raise SystemExit("Inventory preflight produced no audit log.")
-          rows = list(csv.DictReader(logs[-1].open(encoding="utf-8-sig")))
+          rows = list(csv.DictReader(logs[-1].open(encoding="utf-8-sig"), delimiter=";"))
           changes = [row for row in rows if row["status"] == "dry_run_update"]
           zeroes = [row for row in changes if row.get("quantity_sent") == "0"]
           failures = [row for row in rows if row["status"].startswith(("failed", "skipped_missing")) or "error" in row["status"]]
