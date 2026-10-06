@@ -122,9 +122,20 @@ auf Bestand null gesetzt und ebenfalls zurückgelesen wird. Fehler erzeugen ein
 GitHub-Issue mit Link zum Lauf, aber ohne Secrets oder Kundendaten.
 
 Für die Live-Neuanlage in der EU muss im GitHub-Environment `shop` zusätzlich
-`TIKTOK_MANUFACTURER_ID` hinterlegt sein. Die ID muss über die TikTok-Seller-
-Herstellerverwaltung registriert und dem Sellerkonto zugeordnet sein; eine freie
-Verlagsbezeichnung oder eine Responsible-Person-ID ist kein zulässiger Ersatz.
+`TIKTOK_MANUFACTURER_IDS_JSON` hinterlegt sein. Das Secret ist ein JSON-Objekt,
+das die von Libri gelieferten Verlagsnamen (oder eindeutige Namensbestandteile)
+den jeweils in TikTok registrierten Hersteller-IDs zuordnet, zum Beispiel
+`{"Piper":"<TikTok-ID>","Carlsen":"<TikTok-ID>"}`. Die Katalogrotation prüft
+diese Zuordnung bereits im Planlauf und bricht vor jeder Schreibaktion ab, sobald
+Verlag oder TikTok-Hersteller-ID fehlen bzw. mehrdeutig sind. Eine einzige
+globale ID wird nicht automatisch als Ersatz verwendet, weil sie Produkte eines
+anderen Verlags mit falschen GPSR-Daten versehen könnte.
+
+Die Verlagsbezeichnung wird aus den Libri-Produktdaten in `candidate_report.csv`
+übernommen. Neue Hersteller müssen zuerst im Seller Center mit den Daten der
+offiziellen Verlagswebsite bzw. ihres Impressums angelegt werden; anschließend
+wird nur die von TikTok vergebene ID in das Mapping aufgenommen. Ein erfolgreicher
+Workflow-Lauf ist weiterhin der notwendige Betriebsnachweis.
 
 Die früheren lokalen Codex-Automationen um 08:30, 09:00 und 18:00 Uhr sind
 pausierte Legacy-Abläufe und kein Beleg für den produktiven Status. OpenClaw und

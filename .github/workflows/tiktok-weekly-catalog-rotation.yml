@@ -52,6 +52,7 @@ jobs:
           TIKTOK_SHOP_CIPHER: ${{ secrets.TIKTOK_SHOP_CIPHER }}
           TIKTOK_WAREHOUSE_ID: ${{ secrets.TIKTOK_WAREHOUSE_ID }}
           TIKTOK_MANUFACTURER_ID: ${{ secrets.TIKTOK_MANUFACTURER_ID }}
+          TIKTOK_MANUFACTURER_IDS_JSON: ${{ secrets.TIKTOK_MANUFACTURER_IDS_JSON }}
         run: |
           python - <<'PY'
           import os
@@ -74,6 +75,7 @@ jobs:
               "TIKTOK_SHOP_CIPHER",
               "TIKTOK_WAREHOUSE_ID",
               "TIKTOK_MANUFACTURER_ID",
+              "TIKTOK_MANUFACTURER_IDS_JSON",
           ]
 
           with open(".env", "w", encoding="utf-8") as env_file:
@@ -88,12 +90,13 @@ jobs:
 
       - name: Check required catalog compliance configuration
         env:
-          TIKTOK_MANUFACTURER_ID: ${{ secrets.TIKTOK_MANUFACTURER_ID }}
+          TIKTOK_MANUFACTURER_IDS_JSON: ${{ secrets.TIKTOK_MANUFACTURER_IDS_JSON }}
         run: |
-          if [ -z "$TIKTOK_MANUFACTURER_ID" ]; then
-            echo "::error::TIKTOK_MANUFACTURER_ID is missing in the shop environment. Register or select the seller-associated manufacturer in TikTok Seller Center and save its ID as this environment secret."
+          if [ -z "$TIKTOK_MANUFACTURER_IDS_JSON" ] || [ "$TIKTOK_MANUFACTURER_IDS_JSON" = "{}" ]; then
+            echo "::error::TIKTOK_MANUFACTURER_IDS_JSON is missing in the shop environment. Map every Libri publisher to its seller-associated TikTok manufacturer ID."
             exit 1
           fi
+          python -c "import json,os; value=json.loads(os.environ['TIKTOK_MANUFACTURER_IDS_JSON']); assert isinstance(value,dict) and value, 'manufacturer map must be a non-empty JSON object'"
 
       - name: Collect current Libri new releases
         run: |

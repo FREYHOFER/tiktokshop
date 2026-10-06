@@ -74,6 +74,7 @@ LOG_FIELDS = [
 class NewProductRow:
     row: int
     title: str
+    publisher: str
     description: str
     ean: str
     price: str
@@ -219,10 +220,24 @@ def cell(sheet, headers: dict[str, int], row_idx: int, key: str) -> str:
     return clean(sheet.cell(row=row_idx, column=col).value) if col else ""
 
 
+def load_publishers(path: Path) -> dict[str, str]:
+    """Read the publisher recorded by the Libri pipeline for each EAN."""
+    report = path.parent / "candidate_report.csv"
+    if not report.exists():
+        return {}
+    with report.open(encoding="utf-8-sig", newline="") as handle:
+        return {
+            extract_ean(row.get("ean")): clean(row.get("publisher"))
+            for row in csv.DictReader(handle)
+            if extract_ean(row.get("ean")) and clean(row.get("publisher"))
+        }
+
+
 def load_new_rows(path: Path, start_row: int, max_rows: int) -> list[NewProductRow]:
     workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
     sheet = workbook["Template"] if "Template" in workbook.sheetnames else workbook.active
     headers = detect_headers(sheet)
+    publishers = load_publishers(path)
     rows: list[NewProductRow] = []
     for row_idx in range(start_row, min(sheet.max_row, 5000) + 1):
         title = cell(sheet, headers, row_idx, "product_name")
@@ -241,6 +256,7 @@ def load_new_rows(path: Path, start_row: int, max_rows: int) -> list[NewProductR
             NewProductRow(
                 row=row_idx,
                 title=title,
+                publisher=publishers.get(ean, ""),
                 description=cell(sheet, headers, row_idx, "product_description"),
                 ean=ean,
                 price=cell(sheet, headers, row_idx, "price"),
@@ -279,6 +295,35 @@ def description_to_html(value: str) -> str:
     return "".join(f"<p>{html.escape(line)}</p>" for line in paragraphs)
 
 
+def normalized_publisher(value: str) -> str:
+    return " ".join(clean(value).casefold().replace("&", " und ").split())
+
+
+def load_manufacturer_map(raw: str) -> dict[str, str]:
+    if not clean(raw):
+        return {}
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("TIKTOK_MANUFACTURER_IDS_JSON must be a JSON object of publisher names to TikTok manufacturer IDs.")
+    return {normalized_publisher(key): clean(value) for key, value in parsed.items() if clean(key) and clean(value)}
+
+
+def manufacturer_id_for(row: NewProductRow, args: argparse.Namespace) -> str:
+    publisher = normalized_publisher(row.publisher)
+    exact = args.manufacturer_map.get(publisher, "")
+    if exact:
+        return exact
+    aliases = [(name, value) for name, value in args.manufacturer_map.items() if name in publisher or publisher in name]
+    if len(aliases) == 1:
+        return aliases[0][1]
+    if args.manufacturer_id and args.allow_default_manufacturer:
+        return args.manufacturer_id
+    raise ValueError(
+        f"No unambiguous TikTok manufacturer ID is configured for publisher {row.publisher!r} (EAN {row.ean}). "
+        "Add it to TIKTOK_MANUFACTURER_IDS_JSON; the product was not written."
+    )
+
+
 def build_payload(row: NewProductRow, image_uris: list[str], args: argparse.Namespace, warehouse_id: str) -> dict[str, Any]:
     weight_kg = max(0.001, int_string(row.parcel_weight_g, 500) / 1000)
     return {
@@ -310,7 +355,7 @@ def build_payload(row: NewProductRow, image_uris: list[str], args: argparse.Name
         ],
         "package_weight": {"value": f"{weight_kg:.3f}".rstrip("0").rstrip("."), "unit": "KILOGRAM"},
         "responsible_person_ids": [args.responsible_person_id],
-        "manufacturer_ids": [args.manufacturer_id],
+        "manufacturer_ids": [manufacturer_id_for(row, args)],
         "listing_platforms": ["TIKTOK_SHOP"],
         "shipping_insurance_requirement": "NOT_SUPPORTED",
         "minimum_order_quantity": 1,
@@ -679,10 +724,11 @@ def run(args: argparse.Namespace) -> int:
     env_path = Path(args.env)
     env = load_env_file(env_path)
     args.manufacturer_id = clean(args.manufacturer_id or env.get("TIKTOK_MANUFACTURER_ID"))
-    if args.live and not args.manufacturer_id:
+    args.manufacturer_map = load_manufacturer_map(args.manufacturer_ids_json or env.get("TIKTOK_MANUFACTURER_IDS_JSON", ""))
+    if args.live and not args.manufacturer_map and not (args.manufacturer_id and args.allow_default_manufacturer):
         raise ValueError(
-            "TIKTOK_MANUFACTURER_ID is required for live EU product creation. "
-            "Use a manufacturer ID registered for this seller account."
+            "TIKTOK_MANUFACTURER_IDS_JSON is required for live EU product creation. "
+            "Configure each Libri publisher with its seller-associated TikTok manufacturer ID."
         )
     warehouse_id = effective_warehouse_id(args, env)
     client = CatalogRotationClient(env, env_path)
@@ -694,6 +740,8 @@ def run(args: argparse.Namespace) -> int:
     log_rows: list[dict[str, Any]] = []
 
     all_new_rows = load_new_rows(workbook, args.start_row, args.new_scan_limit)
+    for product in all_new_rows:
+        manufacturer_id_for(product, args)
     existing = existing_seller_skus(client, all_new_rows, args, warehouse_id) if all_new_rows else set()
     new_rows = [row for row in all_new_rows if row.seller_sku not in existing]
     for row in all_new_rows:
@@ -786,6 +834,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--category-id", default=DEFAULT_CATEGORY_ID)
     parser.add_argument("--responsible-person-id", default=DEFAULT_RESPONSIBLE_PERSON_ID)
     parser.add_argument("--manufacturer-id", default="", help="Seller-associated TikTok manufacturer ID; required for live creation.")
+    parser.add_argument("--manufacturer-ids-json", default="", help="JSON object mapping Libri publisher names/aliases to seller-associated TikTok manufacturer IDs.")
+    parser.add_argument("--allow-default-manufacturer", action="store_true", help="Explicitly allow TIKTOK_MANUFACTURER_ID as fallback. Disabled by default to prevent wrong GPSR assignments.")
     parser.add_argument("--currency", default=DEFAULT_CURRENCY)
     parser.add_argument("--libri-delay", type=float, default=0.3)
     parser.add_argument("--tiktok-delay", type=float, default=0.2)
