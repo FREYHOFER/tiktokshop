@@ -251,7 +251,11 @@ def collect_requested_seller_skus(args: argparse.Namespace) -> list[str]:
 
 def first_int(*values: object) -> int | None:
     for value in values:
-        text = clean(value).replace(",", ".")
+        # clean() intentionally treats falsy values as empty, but zero is a
+        # valid and safety-critical inventory value.
+        if value is None:
+            continue
+        text = str(value).replace("\ufeff", "").strip().replace(",", ".")
         if not text:
             continue
         try:
