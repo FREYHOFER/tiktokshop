@@ -1,12 +1,29 @@
 # TikTok Shop + Libri integration
 
-This document tracks what is wired into the daily shop workflow and which configuration values are still needed.
+This document tracks the productive shop workflows and which configuration values are still needed.
 
-## Daily workflow
+## Productive scheduler and status
+
+GitHub Actions is the productive scheduler. Determine current operational status
+from the workflow definitions and real GitHub Actions run logs, never solely from
+README text, saved state files, or paused Codex tasks. The old local Codex tasks
+at 08:30, 09:00, and 18:00 are paused legacy tasks. OpenClaw/OpenRouter is a
+separate AI layer and does not currently schedule productive TikTok transactions.
+
+Keep these flows distinct:
+
+- Inventory reconciliation: `.github/workflows/tiktok-inventory-update.yml`
+- Orders and tracking: `.github/workflows/tiktok-order-automation.yml`
+- Catalog rotation: `.github/workflows/tiktok-weekly-catalog-rotation.yml`
+
+Do not claim that a flow works until a real run of the corresponding workflow
+has completed successfully.
+
+## Order and tracking workflow
 
 Workflow: `.github/workflows/tiktok-order-automation.yml`
 
-Schedule: daily at `07:30 UTC`.
+Schedule: every 15 minutes (`*/15 * * * *`), relevant pushes, and manual dispatch.
 
 Steps:
 1. Refresh TikTok access token.
@@ -18,7 +35,7 @@ Steps:
 
 ## Duplicate protection
 
-` .automation/libri_order_state.json ` is the local source of truth for Libri submissions. Before a Libri order is submitted, `scripts/libri_customer_submit.py` checks whether the TikTok order ID is already recorded as `submitted`. If yes, it skips the order.
+`.automation/libri_order_state.json` provides duplicate protection for Libri submissions. Before a Libri order is submitted, `scripts/libri_customer_submit.py` checks whether the TikTok order ID is already recorded as `submitted`. If yes, it skips the order. This persisted state is not, by itself, proof that the workflow is currently healthy; use real Actions run logs for that decision.
 
 Packages with `automation_status` starting with `prepared` are auto-submitted. If a package has warnings, the Libri submitter still validates EANs and customer fields before final submission; hard data problems fail the workflow and create an issue instead of silently leaving the order unplaced.
 

@@ -99,6 +99,70 @@ Je nach verwendetem Modul werden unter anderem benötigt:
 - Zustandsdatei gegen doppelte Bestellverarbeitung
 
 Die produktiven Abläufe sollten erst nach einem erfolgreichen Test mit wenigen Datensätzen aktiviert werden.
+
+## Produktiver Automationsbetrieb
+
+GitHub Actions ist der produktive Scheduler. Der aktuelle Status ist immer anhand
+der Workflow-Dateien und der tatsächlichen Läufe im GitHub-Actions-Tab zu prüfen,
+nicht anhand älterer README-Texte oder pausierter lokaler Aufgaben.
+
+- **Bestellungen und Tracking:** `.github/workflows/tiktok-order-automation.yml`
+  läuft alle 15 Minuten. Er bereitet neue Bestellungen vor, übermittelt verifizierte
+  Kundenbestellungen an Libri und synchronisiert verfügbare Trackingdaten zu TikTok.
+- **Bestandsabgleich:** `.github/workflows/tiktok-inventory-update.yml` läuft täglich.
+- **Katalogrotation:** `.github/workflows/tiktok-weekly-catalog-rotation.yml` läuft
+  wöchentlich; manuelle Läufe sind standardmäßig Dry-Runs.
+
+Die früheren lokalen Codex-Automationen um 08:30, 09:00 und 18:00 Uhr sind
+pausierte Legacy-Abläufe und kein Beleg für den produktiven Status. OpenClaw und
+OpenRouter bilden eine separate KI-Schicht; sie steuern derzeit nicht den
+Scheduler der produktiven TikTok-Transaktionen. Eine Automation gilt erst nach
+einem erfolgreich abgeschlossenen echten Workflow-Lauf als funktionsfähig.
+
+## Tägliche Shoppable-Foto-Slideshow
+
+Der lokale Entwurfs-Workflow erzeugt eine cover-first Slideshow (standardmäßig fünf
+1080×1920-JPGs), einen verkaufsorientierten Titeltext und eine `manifest.json`.
+Der Entwurf wird pro Datum im `.automation/content_state.json` registriert, damit
+Wiederholungen vermieden werden:
+
+```powershell
+python scripts\generate_daily_slideshow.py --date 2026-08-31
+```
+
+Der Generator verwendet ausschließlich unveränderte Originalauszüge aus dem
+Libri-Klappentext. Es gibt keine KI-Hooks, Paraphrasen, Leserzitate oder
+Reddit-Screenshots.
+
+Für einen vertonten Beispiel-Clip:
+
+```powershell
+python scripts\render_blurb_video.py --manifest <manifest.json> --output <beispiel.mp4>
+```
+
+Die Stimme wird lokal über die installierte Windows-Sprachausgabe erzeugt;
+der Klappentext wird nicht an einen Cloud-Dienst gesendet.
+
+Die Bilder enthalten keine URL, QR-Code oder Wasserzeichen. Der klickbare
+TikTok-Shop-Produktanker muss im nativen Shop-Flow gesetzt werden. Für deutsche
+Seller ist dafür – sofern für das Konto freigeschaltet – **Seller Center →
+Shoppable Videos → Auto-post** der offiziell dokumentierte Weg; das Feature ist
+noch im Beta-Rollout und nicht per Seller-REST-API steuerbar. Die allgemeine
+TikTok-Content-Posting-API kann zwar Foto-Posts mit Cover-Index senden, nimmt aber
+keinen Shop-Produktanker entgegen und verlangt eine geprüfte, interaktive Creator-
+UX.
+
+Die T-1-Shop-Metriken können mit dem Seller-Token read-only importiert werden:
+
+```powershell
+python scripts\fetch_shop_video_metrics.py --date 2026-08-30 --end-date 2026-08-31
+```
+
+Dafür muss der Token den Scope `data.shop_analytics.public.read` besitzen. Das
+Script schreibt die Rohdaten nach `outputs\metrics\` und aktualisiert gematchte
+Entwürfe im Content-State; ein Match erfolgt über die gespeicherte Video-ID oder
+den exakten Post-Titel. Die Auswahl nutzt die Ergebnisse als kleinen Lernbonus,
+behält aber eine 14-Tage-Sperre für denselben Titel bei.
 ## Titelrotation: alte Titel gegen Neuerscheinungen
 
 `scripts/rotate_tiktok_catalog.py` ersetzt keine vorhandenen TikTok-Listings inhaltlich. Stattdessen wird sauber rotiert:
@@ -159,7 +223,10 @@ API-Einmalabruf:
 .\scripts\run_order_automation_once.ps1
 ```
 
-Codex Scheduled Task: in der ChatGPT/Codex-Desktop-App **Scheduled** öffnen und eine Aufgabe im bestehenden Chat oder als eigenständige Aufgabe für dieses Projekt anlegen. Für den täglichen Lauf um 08:30 Uhr diesen Prompt verwenden:
+Legacy-Hinweis: Die früheren lokalen Codex-Aufgaben um 08:30, 09:00 und 18:00 Uhr
+sind pausiert. Der folgende Prompt bleibt nur als historische Referenz erhalten
+und darf nicht als Beschreibung des aktuellen produktiven Schedulers verstanden
+werden:
 
 ```text
 Jeden Tag um 08:30 Uhr Europe/Berlin im Projekt C:\Users\Stipendiat3\tiktokshop laufen:
@@ -190,7 +257,12 @@ Dauerlauf fuer neue Bestellungen: prueft regelmaessig TikTok und bereitet nur ne
 .\scripts\watch_order_automation_new_orders.ps1 -PollMinutes 5
 ```
 
-Laptop-unabhaengiger Lauf ueber GitHub Actions: `.github/workflows/tiktok-order-automation.yml` ist nur noch manuell ueber den Actions-Tab oder bei relevanten Pushes startbar; der fruehere 15-Minuten-Zeitplan ist entfernt. Neue versandbereite TikTok-Orders werden vorbereitet und danach automatisch als verifizierte Libri-Kundenbestellung abgesendet. Dafuer muessen in GitHub unter `Settings > Secrets and variables > Actions` im Environment `shop` diese Secrets gesetzt sein:
+Produktiver Lauf ueber GitHub Actions: `.github/workflows/tiktok-order-automation.yml`
+läuft alle 15 Minuten, bei relevanten Pushes und bei manueller Auslösung. Neue
+versandbereite TikTok-Orders werden vorbereitet und danach automatisch als
+verifizierte Libri-Kundenbestellung abgesendet. Dafuer muessen in GitHub unter
+`Settings > Secrets and variables > Actions` im Environment `shop` diese Secrets
+gesetzt sein:
 
 - `LIBRI_CUSTOMER_NUMBER`
 - `LIBRI_USERNAME`
