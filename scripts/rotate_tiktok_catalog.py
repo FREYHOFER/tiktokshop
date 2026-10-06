@@ -467,16 +467,35 @@ def auto_retire_candidates(
     skus = discover_current_skus(client, args, warehouse_id)
     skus = [sku for sku in skus if sku.ean not in exclude_eans]
     candidates: list[RetireCandidate] = []
-    opener = login(Path(args.env)) if args.refresh_libri else None
+    env_path = Path(args.env)
+    opener = login(env_path) if args.refresh_libri else None
     libri_page_dir = run_dir / "retire_libri_pages"
+    requests_in_session = 0
 
     for sku in skus:
         try:
-            stock = (
-                fetch_libri_stock(sku.ean, opener, libri_page_dir)
-                if args.refresh_libri
-                else read_local_libri_stock(sku.ean, args.local_libri_dir)
-            )
+            if args.refresh_libri:
+                stock = None
+                last_error: Exception | None = None
+                for attempt in range(max(args.libri_retries, 0) + 1):
+                    try:
+                        if args.libri_session_refresh_every > 0 and requests_in_session >= args.libri_session_refresh_every:
+                            opener = login(env_path)
+                            requests_in_session = 0
+                        stock = fetch_libri_stock(sku.ean, opener, libri_page_dir)
+                        requests_in_session += 1
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                        if attempt >= max(args.libri_retries, 0):
+                            raise
+                        time.sleep(min(2**attempt, 8))
+                        opener = login(env_path)
+                        requests_in_session = 0
+                if stock is None:
+                    raise RuntimeError(f"Libri stock check failed: {last_error}")
+            else:
+                stock = read_local_libri_stock(sku.ean, args.local_libri_dir)
             if stock.quantity is not None and stock.quantity <= args.retire_stock_threshold:
                 candidates.append(
                     RetireCandidate(
@@ -748,6 +767,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--retire-stock-threshold", type=int, default=0, help="Auto-retire when current Libri stock is <= this value.")
     parser.add_argument("--retire-product-statuses", default="ACTIVATE", help="Comma-separated TikTok product statuses eligible for automatic retirement.")
     parser.add_argument("--refresh-libri", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--libri-retries", type=int, default=3)
+    parser.add_argument("--libri-session-refresh-every", type=int, default=20)
     parser.add_argument("--local-libri-dir", action="append", default=["libri_product_pages", "libri_bulk_pages"])
     parser.add_argument("--seller-sku-prefix", default=DEFAULT_SELLER_SKU_PREFIX)
     parser.add_argument("--warehouse-id", default="", help="TikTok warehouse ID. Defaults to TIKTOK_WAREHOUSE_ID or project default.")

@@ -133,6 +133,9 @@ jobs:
             "--retire-product-statuses" "ACTIVATE"
             "--max-scan-pages" "10"
             "--max-scan-skus" "500"
+            "--libri-retries" "4"
+            "--libri-session-refresh-every" "10"
+            "--stop-on-error"
           )
           python scripts/rotate_tiktok_catalog.py "${args[@]}"
 
@@ -173,6 +176,8 @@ jobs:
             --retire-product-statuses ACTIVATE \
             --max-scan-pages 10 \
             --max-scan-skus 500 \
+            --libri-retries 4 \
+            --libri-session-refresh-every 10 \
             --live \
             --stop-on-error
 
