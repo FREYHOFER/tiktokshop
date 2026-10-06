@@ -51,6 +51,7 @@ jobs:
           TIKTOK_REFRESH_TOKEN: ${{ secrets.TIKTOK_REFRESH_TOKEN }}
           TIKTOK_SHOP_CIPHER: ${{ secrets.TIKTOK_SHOP_CIPHER }}
           TIKTOK_WAREHOUSE_ID: ${{ secrets.TIKTOK_WAREHOUSE_ID }}
+          TIKTOK_MANUFACTURER_ID: ${{ secrets.TIKTOK_MANUFACTURER_ID }}
         run: |
           python - <<'PY'
           import os
@@ -72,6 +73,7 @@ jobs:
               "TIKTOK_REFRESH_TOKEN",
               "TIKTOK_SHOP_CIPHER",
               "TIKTOK_WAREHOUSE_ID",
+              "TIKTOK_MANUFACTURER_ID",
           ]
 
           with open(".env", "w", encoding="utf-8") as env_file:
@@ -83,6 +85,15 @@ jobs:
 
       - name: Refresh TikTok access token
         run: python scripts/refresh_tiktok_access_token.py --env .env
+
+      - name: Check required catalog compliance configuration
+        env:
+          TIKTOK_MANUFACTURER_ID: ${{ secrets.TIKTOK_MANUFACTURER_ID }}
+        run: |
+          if [ -z "$TIKTOK_MANUFACTURER_ID" ]; then
+            echo "::error::TIKTOK_MANUFACTURER_ID is missing in the shop environment. Register or select the seller-associated manufacturer in TikTok Seller Center and save its ID as this environment secret."
+            exit 1
+          fi
 
       - name: Collect current Libri new releases
         run: |

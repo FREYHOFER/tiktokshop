@@ -121,6 +121,11 @@ wird zuerst erstellt und per TikTok-Lesezugriff bestätigt, bevor der alte Titel
 auf Bestand null gesetzt und ebenfalls zurückgelesen wird. Fehler erzeugen ein
 GitHub-Issue mit Link zum Lauf, aber ohne Secrets oder Kundendaten.
 
+Für die Live-Neuanlage in der EU muss im GitHub-Environment `shop` zusätzlich
+`TIKTOK_MANUFACTURER_ID` hinterlegt sein. Die ID muss über die TikTok-Seller-
+Herstellerverwaltung registriert und dem Sellerkonto zugeordnet sein; eine freie
+Verlagsbezeichnung oder eine Responsible-Person-ID ist kein zulässiger Ersatz.
+
 Die früheren lokalen Codex-Automationen um 08:30, 09:00 und 18:00 Uhr sind
 pausierte Legacy-Abläufe und kein Beleg für den produktiven Status. OpenClaw und
 OpenRouter bilden eine separate KI-Schicht; sie steuern derzeit nicht den

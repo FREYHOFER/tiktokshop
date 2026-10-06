@@ -63,6 +63,7 @@ Recommended for stable operation:
 
 - `TIKTOK_SHOP_CIPHER`
 - `TIKTOK_WAREHOUSE_ID`
+- `TIKTOK_MANUFACTURER_ID` — required for live EU catalog creation and must be associated with the seller account
 - `TIKTOK_SHIPPING_PROVIDER_NAME` — default in workflow: `DHL`
 - `TIKTOK_SHIPPING_PROVIDER_ID` — optional, but more reliable if TikTok requires the carrier ID
 - `TIKTOK_SHIP_PACKAGE_PATH_TEMPLATE` — default in workflow: `/fulfillment/{version}/packages/{package_id}/ship`

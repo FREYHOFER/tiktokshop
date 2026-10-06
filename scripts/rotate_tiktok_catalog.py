@@ -310,7 +310,7 @@ def build_payload(row: NewProductRow, image_uris: list[str], args: argparse.Name
         ],
         "package_weight": {"value": f"{weight_kg:.3f}".rstrip("0").rstrip("."), "unit": "KILOGRAM"},
         "responsible_person_ids": [args.responsible_person_id],
-        "manufacturer_ids": [],
+        "manufacturer_ids": [args.manufacturer_id],
         "listing_platforms": ["TIKTOK_SHOP"],
         "shipping_insurance_requirement": "NOT_SUPPORTED",
         "minimum_order_quantity": 1,
@@ -678,6 +678,12 @@ def pair_rotation(new_rows: list[NewProductRow], retire_candidates: list[RetireC
 def run(args: argparse.Namespace) -> int:
     env_path = Path(args.env)
     env = load_env_file(env_path)
+    args.manufacturer_id = clean(args.manufacturer_id or env.get("TIKTOK_MANUFACTURER_ID"))
+    if args.live and not args.manufacturer_id:
+        raise ValueError(
+            "TIKTOK_MANUFACTURER_ID is required for live EU product creation. "
+            "Use a manufacturer ID registered for this seller account."
+        )
     warehouse_id = effective_warehouse_id(args, env)
     client = CatalogRotationClient(env, env_path)
     workbook = Path(args.new_workbook).resolve() if args.new_workbook else discover_latest_workbook().resolve()
@@ -779,6 +785,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-images", type=int, default=5)
     parser.add_argument("--category-id", default=DEFAULT_CATEGORY_ID)
     parser.add_argument("--responsible-person-id", default=DEFAULT_RESPONSIBLE_PERSON_ID)
+    parser.add_argument("--manufacturer-id", default="", help="Seller-associated TikTok manufacturer ID; required for live creation.")
     parser.add_argument("--currency", default=DEFAULT_CURRENCY)
     parser.add_argument("--libri-delay", type=float, default=0.3)
     parser.add_argument("--tiktok-delay", type=float, default=0.2)
