@@ -17,6 +17,7 @@ import html
 import http.cookiejar
 import re
 import sys
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -123,18 +124,42 @@ def login(env_path: Path):
     return opener
 
 
-def save_product_pages(opener, isbns: list[str], output_dir: Path) -> list[tuple[str, str, str]]:
+def save_product_pages(
+    opener,
+    isbns: list[str],
+    output_dir: Path,
+    env_path: Path,
+    retries: int = 3,
+    session_refresh_every: int = 20,
+) -> list[tuple[str, str, str]]:
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[tuple[str, str, str]] = []
+    requests_in_session = 0
     for isbn in isbns:
         path = output_dir / f"{isbn}.html"
         if path.exists() and path.stat().st_size > 0:
             results.append((isbn, "exists", str(path)))
             continue
         url = PRODUCT_URL.format(ean=isbn)
-        final_url, body = fetch(opener, url)
-        if "Login.html" in final_url or "<title>Mein.Libri - Login</title>" in body:
-            results.append((isbn, "failed", "redirected_to_login"))
+        last_error = ""
+        for attempt in range(max(retries, 0) + 1):
+            try:
+                if session_refresh_every > 0 and requests_in_session >= session_refresh_every:
+                    opener = login(env_path)
+                    requests_in_session = 0
+                final_url, body = fetch(opener, url)
+                requests_in_session += 1
+                if "Login.html" not in final_url and "<title>Mein.Libri - Login</title>" not in body:
+                    break
+                last_error = "redirected_to_login"
+            except Exception as exc:
+                last_error = str(exc)[:500]
+            if attempt < max(retries, 0):
+                time.sleep(min(2**attempt, 8))
+                opener = login(env_path)
+                requests_in_session = 0
+        else:
+            results.append((isbn, "failed", last_error or "fetch_failed"))
             continue
         path.write_text(body, encoding="utf-8")
         results.append((isbn, "saved", str(path)))
@@ -148,6 +173,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--isbn-csv", action="append", default=[], help="CSV containing ean/isbn/gtin_code. Can be repeated.")
     parser.add_argument("--output-dir", default="libri_product_pages", help="Where to save fetched HTML pages.")
     parser.add_argument("--limit", type=int, default=0, help="Optional max ISBN count.")
+    parser.add_argument("--retries", type=int, default=3, help="Re-login and retry failed product-page requests.")
+    parser.add_argument("--session-refresh-every", type=int, default=20, help="Renew the Libri session after this many requests.")
     return parser
 
 
@@ -156,8 +183,16 @@ def main(argv: list[str] | None = None) -> int:
     isbns = read_isbns(args)
     if not isbns:
         raise SystemExit("No ISBN/EAN values found.")
-    opener = login(Path(args.env))
-    results = save_product_pages(opener, isbns, Path(args.output_dir))
+    env_path = Path(args.env)
+    opener = login(env_path)
+    results = save_product_pages(
+        opener,
+        isbns,
+        Path(args.output_dir),
+        env_path,
+        retries=args.retries,
+        session_refresh_every=args.session_refresh_every,
+    )
     for isbn, status, detail in results:
         print(f"{isbn}: {status} - {detail}")
     return 0 if all(status in {"saved", "exists"} for _, status, _ in results) else 1

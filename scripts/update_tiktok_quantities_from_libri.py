@@ -616,7 +616,14 @@ def run(args: argparse.Namespace) -> int:
 
     write_summary(summary_path, log_rows, args.dry_run, log_path)
     updated_count = sum(1 for row in log_rows if row["status"] == "updated")
-    failed_count = sum(1 for row in log_rows if row["status"] == "failed")
+    failed_statuses = {
+        "failed",
+        "updated_with_response_errors",
+        "skipped_missing_tiktok_ids",
+        "skipped_missing_warehouse",
+        "skipped_missing_libri_stock",
+    }
+    failed_count = sum(1 for row in log_rows if row["status"] in failed_statuses)
     dry_run_count = sum(1 for row in log_rows if row["status"] == "dry_run_update")
     unchanged_count = sum(1 for row in log_rows if row["status"] == "unchanged")
     print(f"Resolved TikTok SKUs: {len(tiktok_skus)}")

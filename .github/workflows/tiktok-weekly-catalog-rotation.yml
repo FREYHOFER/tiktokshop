@@ -20,6 +20,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   rotate-catalog:
@@ -102,7 +103,9 @@ jobs:
             --env .env \
             --isbn-csv outputs/weekly_catalog_rotation/libri_new_releases.csv \
             --output-dir outputs/weekly_catalog_rotation/libri_pages \
-            --limit 100
+            --limit 100 \
+            --retries 4 \
+            --session-refresh-every 10
 
       - name: Build checked TikTok upload workbook
         run: |
@@ -114,12 +117,12 @@ jobs:
             --output-dir outputs/weekly_catalog_rotation/upload_pack \
             --limit 30
 
-      - name: Rotate catalog
+      - name: Plan catalog rotation
+        id: plan
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          DRY_RUN: ${{ inputs.dry_run || false }}
           REPLACE_COUNT: ${{ inputs.replace_count || 10 }}
         run: |
+          if [ "$REPLACE_COUNT" -gt 3 ]; then REPLACE_COUNT=3; fi
           args=(
             "--env" ".env"
             "--new-workbook" "outputs/weekly_catalog_rotation/upload_pack/tiktok_upload_green.xlsx"
@@ -131,12 +134,47 @@ jobs:
             "--max-scan-pages" "10"
             "--max-scan-skus" "500"
           )
-
-          if [ "$EVENT_NAME" = "schedule" ] || [ "$DRY_RUN" != "true" ]; then
-            args+=("--live")
-          fi
-
           python scripts/rotate_tiktok_catalog.py "${args[@]}"
+
+          python - <<'PY'
+          import csv, pathlib, os
+
+          logs = sorted(pathlib.Path("outputs/catalog_rotation").glob("*/catalog_rotation_log.csv"))
+          if not logs:
+              raise SystemExit("Catalog preflight produced no audit log.")
+          rows = list(csv.DictReader(logs[-1].open(encoding="utf-8-sig")))
+          creates = [row for row in rows if row["status"] == "planned_create"]
+          retires = [row for row in rows if row["status"] == "planned_zero_inventory"]
+          failures = [row for row in rows if row["status"] == "failed" or "error" in row["status"]]
+          print(f"Catalog preflight: creates={len(creates)} retires={len(retires)} failures={len(failures)}")
+          if failures:
+              raise SystemExit(f"Catalog preflight contains {len(failures)} failures.")
+          if len(creates) != len(retires):
+              raise SystemExit("Catalog preflight does not have balanced create/retire pairs.")
+          if len(creates) > 3:
+              raise SystemExit("Catalog preflight exceeds the live safety limit of three pairs.")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"should_run={'true' if creates else 'false'}\n")
+              output.write(f"pair_count={len(creates)}\n")
+          PY
+
+      - name: Apply live catalog rotation
+        if: steps.plan.outputs.should_run == 'true' && (github.event_name == 'schedule' || inputs.dry_run != true)
+        env:
+          PAIR_COUNT: ${{ steps.plan.outputs.pair_count }}
+        run: |
+          python scripts/rotate_tiktok_catalog.py \
+            --env .env \
+            --new-workbook outputs/weekly_catalog_rotation/upload_pack/tiktok_upload_green.xlsx \
+            --output-root outputs/catalog_rotation \
+            --replace-count "$PAIR_COUNT" \
+            --save-mode LISTING \
+            --retire-stock-threshold 0 \
+            --retire-product-statuses ACTIVATE \
+            --max-scan-pages 10 \
+            --max-scan-skus 500 \
+            --live \
+            --stop-on-error
 
       - name: Upload rotation audit
         if: always()
@@ -147,4 +185,13 @@ jobs:
             outputs/weekly_catalog_rotation/libri_new_releases.csv
             outputs/weekly_catalog_rotation/upload_pack/
             outputs/catalog_rotation/
-          retention-days: 21
+          retention-days: 30
+
+      - name: Notify about catalog rotation failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "TikTok catalog rotation failed ($GITHUB_RUN_ID)" \
+            --body "The live catalog rotation workflow failed. Review the run and its audit artifact: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

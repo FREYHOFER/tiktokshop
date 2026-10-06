@@ -20,6 +20,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   update-inventory:
@@ -82,10 +83,52 @@ jobs:
       - name: Refresh TikTok access token
         run: python scripts/refresh_tiktok_access_token.py --env .env
 
-      - name: Update quantities from Libri
+      - name: Plan inventory changes
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          DRY_RUN: ${{ inputs.dry_run || false }}
+          LIMIT: ${{ inputs.limit || 0 }}
+        run: |
+          args=(
+            "--env" ".env"
+            "--output-root" "outputs/inventory_updates"
+            "--product-statuses" "ACTIVATE,SELLER_DEACTIVATED"
+            "--dry-run"
+          )
+
+          if [ "$LIMIT" != "0" ]; then
+            args+=("--limit" "$LIMIT")
+          fi
+
+          python scripts/update_tiktok_quantities_from_libri.py "${args[@]}"
+
+      - name: Validate inventory plan
+        env:
+          LIMIT: ${{ inputs.limit || 0 }}
+        run: |
+          python - <<'PY'
+          import csv, os, pathlib
+
+          logs = sorted(pathlib.Path("outputs/inventory_updates").glob("*/inventory_update_log.csv"))
+          if not logs:
+              raise SystemExit("Inventory preflight produced no audit log.")
+          rows = list(csv.DictReader(logs[-1].open(encoding="utf-8-sig")))
+          changes = [row for row in rows if row["status"] == "dry_run_update"]
+          zeroes = [row for row in changes if row.get("quantity_sent") == "0"]
+          failures = [row for row in rows if row["status"].startswith(("failed", "skipped_missing")) or "error" in row["status"]]
+          minimum = 1 if int(os.environ.get("LIMIT", "0")) else 50
+          print(f"Inventory preflight: resolved={len(rows)} changes={len(changes)} zeroes={len(zeroes)} failures={len(failures)}")
+          if len(rows) < minimum:
+              raise SystemExit(f"Inventory preflight resolved only {len(rows)} SKUs; expected at least {minimum}.")
+          if len(changes) > 30:
+              raise SystemExit(f"Inventory preflight would change {len(changes)} SKUs; safety limit is 30.")
+          if len(zeroes) > 15:
+              raise SystemExit(f"Inventory preflight would set {len(zeroes)} SKUs to zero; safety limit is 15.")
+          if failures:
+              raise SystemExit(f"Inventory preflight contains {len(failures)} failed or incomplete rows.")
+          PY
+
+      - name: Apply inventory changes
+        if: github.event_name == 'schedule' || inputs.dry_run != true
+        env:
           LIMIT: ${{ inputs.limit || 0 }}
         run: |
           args=(
@@ -93,15 +136,9 @@ jobs:
             "--output-root" "outputs/inventory_updates"
             "--product-statuses" "ACTIVATE,SELLER_DEACTIVATED"
           )
-
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DRY_RUN" = "true" ]; then
-            args+=("--dry-run")
-          fi
-
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$LIMIT" != "0" ]; then
+          if [ "$LIMIT" != "0" ]; then
             args+=("--limit" "$LIMIT")
           fi
-
           python scripts/update_tiktok_quantities_from_libri.py "${args[@]}"
 
       - name: Upload inventory update log
@@ -110,4 +147,13 @@ jobs:
         with:
           name: tiktok-inventory-update-${{ github.run_id }}
           path: outputs/inventory_updates/
-          retention-days: 14
+          retention-days: 30
+
+      - name: Notify about inventory automation failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "TikTok inventory automation failed ($GITHUB_RUN_ID)" \
+            --body "The inventory workflow failed. Review the run and its audit artifact: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

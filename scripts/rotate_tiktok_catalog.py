@@ -541,8 +541,19 @@ def retire_zero_inventory(
     try:
         response = client.update_inventory(sku.product_id, sku.sku_id, sku.warehouse_id, 0)
         errors = response_errors(response)
-        row["status"] = "retired_zero_inventory_with_response_errors" if errors else "retired_zero_inventory"
-        row["message"] = errors[:1500] if errors else row["message"]
+        if errors:
+            raise TikTokApiError(errors[:1500])
+        verified = False
+        for attempt in range(args.verify_retries + 1):
+            matches = find_skus_by_seller_sku(client, [sku.seller_sku], args, sku.warehouse_id)
+            if matches and matches[0].current_quantity == 0:
+                verified = True
+                break
+            time.sleep(args.verify_delay * (attempt + 1))
+        if not verified:
+            raise TikTokApiError("TikTok did not confirm zero inventory after the update.")
+        row["status"] = "retired_zero_inventory"
+        row["message"] = "TikTok inventory was set to zero and verified by a follow-up read."
     except Exception as exc:
         row["status"] = "failed"
         row["message"] = str(exc)[:1500]
@@ -600,18 +611,25 @@ def create_product(
 
         if args.live:
             response = client.create_product(payload)
+            errors = response_errors(response)
+            if errors:
+                raise TikTokApiError(errors[:1500])
             data = response.get("data") or {}
             skus = data.get("skus") or []
+            verified = False
+            for attempt in range(args.verify_retries + 1):
+                if existing_seller_skus(client, [product], args, warehouse_id):
+                    verified = True
+                    break
+                time.sleep(args.verify_delay * (attempt + 1))
+            if not verified:
+                raise TikTokApiError("TikTok did not return the new seller SKU after product creation.")
             row.update(
                 status="created",
                 product_id=clean(data.get("product_id")),
                 sku_id=clean((skus[0] or {}).get("id")) if skus else "",
-                message=compact_json(
-                    {
-                        "request_id": response.get("request_id"),
-                        "warnings": data.get("warnings") or [],
-                    }
-                ),
+                message="Product creation was confirmed by a follow-up TikTok read. "
+                + compact_json({"request_id": response.get("request_id"), "warnings": data.get("warnings") or []}),
             )
         else:
             row["message"] = "Payload written, product not created."
@@ -699,7 +717,7 @@ def run(args: argparse.Namespace) -> int:
                 retired_successes += 1
 
     write_summary(summary_path, args, log_rows, workbook, log_path)
-    failed = sum(1 for row in log_rows if row["status"] == "failed")
+    failed = sum(1 for row in log_rows if row["status"] == "failed" or "error" in row["status"])
     print(f"Mode: {'live' if args.live else 'dry-run'}")
     print(f"New workbook: {workbook}")
     print(f"Selected new products: {len(new_rows)}")
@@ -743,6 +761,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--currency", default=DEFAULT_CURRENCY)
     parser.add_argument("--libri-delay", type=float, default=0.3)
     parser.add_argument("--tiktok-delay", type=float, default=0.2)
+    parser.add_argument("--verify-retries", type=int, default=5, help="Follow-up reads used to verify TikTok writes.")
+    parser.add_argument("--verify-delay", type=float, default=2.0, help="Base delay between verification reads.")
     parser.add_argument("--stop-on-error", action=argparse.BooleanOptionalAction, default=False)
     return parser
 

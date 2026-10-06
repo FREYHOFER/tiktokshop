@@ -16,6 +16,15 @@ Keep these flows distinct:
 - Orders and tracking: `.github/workflows/tiktok-order-automation.yml`
 - Catalog rotation: `.github/workflows/tiktok-weekly-catalog-rotation.yml`
 
+Inventory runs use a dry-run preflight before applying changes and stop on
+unexpected scope or incomplete stock data. Scheduled catalog rotation is live,
+but limited to three balanced create/retire pairs per run. A new listing must be
+confirmed by a TikTok follow-up read before the paired old SKU is set to zero;
+the zero inventory update is also read back. Libri product-page sessions are
+renewed proactively and retried after login redirects. Workflow failures create
+a GitHub issue that links to the private run audit without including customer
+data or credentials.
+
 Do not claim that a flow works until a real run of the corresponding workflow
 has completed successfully.
 

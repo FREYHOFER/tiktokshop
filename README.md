@@ -111,7 +111,15 @@ nicht anhand älterer README-Texte oder pausierter lokaler Aufgaben.
   Kundenbestellungen an Libri und synchronisiert verfügbare Trackingdaten zu TikTok.
 - **Bestandsabgleich:** `.github/workflows/tiktok-inventory-update.yml` läuft täglich.
 - **Katalogrotation:** `.github/workflows/tiktok-weekly-catalog-rotation.yml` läuft
-  wöchentlich; manuelle Läufe sind standardmäßig Dry-Runs.
+  wöchentlich live; manuelle Läufe sind standardmäßig Dry-Runs.
+
+Beide schreibenden Abläufe erzeugen zuerst einen Prüfplan. Der Bestandsabgleich
+bricht bei ungewöhnlich wenigen gefundenen SKUs, mehr als 30 Änderungen, mehr
+als 15 Nullsetzungen oder unvollständigen Datensätzen ab. Die wöchentliche
+Katalogrotation ist auf drei ausgeglichene Titelpaare begrenzt: Das neue Listing
+wird zuerst erstellt und per TikTok-Lesezugriff bestätigt, bevor der alte Titel
+auf Bestand null gesetzt und ebenfalls zurückgelesen wird. Fehler erzeugen ein
+GitHub-Issue mit Link zum Lauf, aber ohne Secrets oder Kundendaten.
 
 Die früheren lokalen Codex-Automationen um 08:30, 09:00 und 18:00 Uhr sind
 pausierte Legacy-Abläufe und kein Beleg für den produktiven Status. OpenClaw und
