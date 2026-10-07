@@ -18,6 +18,7 @@ import http.cookiejar
 import re
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -109,19 +110,49 @@ def extract_login_payload(login_html: str, customer_number: str, username: str, 
     return payload
 
 
-def login(env_path: Path):
+def login(env_path: Path, retries: int = 4, retry_delay: float = 2.0):
+    """Open a fresh authenticated Libri session, retrying transient rejections.
+
+    Libri sometimes returns the login form again for otherwise valid credentials,
+    especially after several sessions were opened close together. Each retry uses
+    a new cookie jar. Diagnostics deliberately contain no credentials or response
+    body.
+    """
     env = load_env_file(env_path)
     customer_number, username, password = required_env(env)
+    attempts = max(retries, 0) + 1
+    last_reason = "unknown"
 
-    cookie_jar = http.cookiejar.CookieJar()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
-    _, login_html = fetch(opener, LOGIN_URL)
-    payload = extract_login_payload(login_html, customer_number, username, password)
-    final_url, result_html = fetch(opener, LOGIN_URL, payload)
+    for attempt in range(attempts):
+        try:
+            cookie_jar = http.cookiejar.CookieJar()
+            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+            _, login_html = fetch(opener, LOGIN_URL)
+            payload = extract_login_payload(login_html, customer_number, username, password)
+            final_url, result_html = fetch(opener, LOGIN_URL, payload)
+            stayed_on_login = "Login.html" in final_url or "<title>Mein.Libri - Login</title>" in result_html
+            if not stayed_on_login or "Logout" in result_html:
+                return opener
+            last_reason = "login_form_returned"
+        except urllib.error.HTTPError as exc:
+            last_reason = f"http_{exc.code}"
+        except (urllib.error.URLError, TimeoutError) as exc:
+            last_reason = type(exc).__name__.lower()
 
-    if "Login.html" in final_url and "Logout" not in result_html:
-        raise SystemExit("Libri login failed or stayed on login page. Check .env values.")
-    return opener
+        if attempt + 1 < attempts:
+            delay = min(max(retry_delay, 0.0) * (2**attempt), 30.0)
+            print(
+                f"Libri login attempt {attempt + 1}/{attempts} failed ({last_reason}); "
+                f"retrying in {delay:g}s.",
+                file=sys.stderr,
+            )
+            if delay:
+                time.sleep(delay)
+
+    raise SystemExit(
+        f"Libri login failed after {attempts} attempts ({last_reason}). "
+        "Credentials are present, but Libri did not establish a session; retry later and check the account only if this persists."
+    )
 
 
 def save_product_pages(

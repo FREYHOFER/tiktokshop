@@ -137,6 +137,12 @@ offiziellen Verlagswebsite bzw. ihres Impressums angelegt werden; anschließend
 wird nur die von TikTok vergebene ID in das Mapping aufgenommen. Ein erfolgreicher
 Workflow-Lauf ist weiterhin der notwendige Betriebsnachweis.
 
+Der Libri-Login öffnet für jeden Versuch eine neue Sitzung und wiederholt eine
+vorübergehend abgewiesene Anmeldung mit wachsender Wartezeit. Die Protokolle
+unterscheiden eine zurückgegebene Loginseite, HTTP-Fehler und Verbindungsfehler,
+ohne Zugangsdaten oder Seiteninhalte auszugeben. Erst nach fünf fehlgeschlagenen
+Versuchen wird der Workflow sicher vor TikTok-Schreibaktionen beendet.
+
 Die früheren lokalen Codex-Automationen um 08:30, 09:00 und 18:00 Uhr sind
 pausierte Legacy-Abläufe und kein Beleg für den produktiven Status. OpenClaw und
 OpenRouter bilden eine separate KI-Schicht; sie steuern derzeit nicht den
