@@ -89,6 +89,36 @@
       "synced_at": "2026-10-14T18:20:12.725868+00:00",
       "tiktok_package_status": "PROCESSING",
       "tiktok_tracking_number": "00340434263839841781"
+    },
+    "66249647": {
+      "checked_at": "2026-10-17T12:59:37.050117+00:00",
+      "dhl": {
+        "carrier": "DHL Paket",
+        "status": "verification_unavailable",
+        "status_time": "",
+        "verification_error": "JSONDecodeError"
+      },
+      "document": {
+        "customer_number": "32164",
+        "date": "17.10.2026",
+        "description": "Direktversand-Lieferschein",
+        "document_number": "66249647",
+        "pdf_url": "/document/delivery-note/32164/BSVS/557468115/66249647.pdf",
+        "tracking_number": "00340434263839950476",
+        "value": "9,09 €"
+      },
+      "eans": [
+        "9783548290584"
+      ],
+      "order_id": "576967652818262036",
+      "package_id": "1154478792160221204",
+      "provider_id": "7038796963025782530",
+      "provider_name": "DHL Paket",
+      "recipient": "Benjamin Michel",
+      "status": "synced",
+      "synced_at": "2026-10-17T12:59:37.782594+00:00",
+      "tiktok_package_status": "PROCESSING",
+      "tiktok_tracking_number": "00340434263839950476"
     }
   }
 }
