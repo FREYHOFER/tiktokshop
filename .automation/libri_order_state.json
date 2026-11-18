@@ -104,5 +104,7 @@
       "submitted_at": "2026-10-16T12:44:25+00:00"
     }
   },
-  "meta": {}
+  "meta": {
+    "libri_login_issue_reported": "2026-11-18T18:01:42+00:00"
+  }
 }
